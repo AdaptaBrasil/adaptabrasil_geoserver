@@ -1,11 +1,12 @@
 from flask import Flask, render_template, request
+from flask_cors import CORS
 
 app = Flask(__name__)
-
+CORS(app)
 @app.route('/')
 def homepage():
     return render_template("home.html", map_layer=
-        "adaptabrasil:BR_UF_2024")
+        "adaptabrasil:vw_indice_de_risco_de_impacto_do_estresse_hidrico")
 
 @app.route('/mapa')
 def mapa():
