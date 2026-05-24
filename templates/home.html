@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}Mapa | AdaptaBrasil{% endblock %}
+
+{% block custom_css %}
+    {{ super() }}
+{% endblock %}
+
+{% block content %}
+  <div class="d-flex" style="height: calc(100vh - 70px);">
+
+  <!-- Barra lateral -->
+  <div class="bg-light p-4 border-end" style="width: 400px; overflow-y: auto;">
+
+    <!-- Selects -->
+    <div class="mb-3" style="margin-top: 30px;">
+      <select class="form-select">
+        <option>Brasil</option>
+      </select>
+    </div>
+    <div class="mb-3">
+      <select class="form-select">
+        <option>27 Unidades Federativas</option>
+      </select>
+    </div>
+
+    <!-- Ícones dos indicadores -->
+    <div class="row row-cols-2 g-3" style="margin-top: 20px;">
+      <div class="col">
+        <a href="{{ url_for('mapa', indicador='recursos_hidricos') }}" style="text-decoration: none; color: inherit;">
+          <div class="card text-center p-3 shadow-sm" style="height: 160px;">
+            <img src="{{ url_for('static', filename='img/recursos_hidricos.png') }}" alt="Recursos Hídricos"
+                 class="mx-auto d-block" style="height: 80px; object-fit: contain; margin-bottom: 8px;">
+            <div class="small">Recursos Hídricos</div>
+          </div>
+        </a>
+      </div>
+
+      <div class="col">
+        <a href="{{ url_for('mapa', indicador='seguranca_alimentar') }}" style="text-decoration: none; color: inherit;">
+          <div class="card text-center p-3 shadow-sm" style="height: 160px;">
+            <img src="{{ url_for('static', filename='img/seguranca_alimentar.png') }}" alt="Segurança Alimentar"
+                 class="mx-auto d-block" style="height: 80px; object-fit: contain; margin-bottom: 8px;">
+            <div class="small">Segurança Alimentar</div>
+          </div>
+        </a>
+      </div>
+
+      <div class="col">
+        <a href="{{ url_for('mapa', indicador='seguranca_energetica') }}" style="text-decoration: none; color: inherit;">
+          <div class="card text-center p-3 shadow-sm" style="height: 160px;">
+            <img src="{{ url_for('static', filename='img/seguranca_energetica.png') }}" alt="Segurança Energética"
+                 class="mx-auto d-block" style="height: 80px; object-fit: contain; margin-bottom: 8px;">
+            <div class="small">Segurança Energética</div>
+          </div>
+        </a>
+      </div>
+
+      <div class="col">
+        <a href="{{ url_for('mapa', indicador='infraestrutura_portuaria') }}" style="text-decoration: none; color: inherit;">
+          <div class="card text-center p-3 shadow-sm" style="height: 160px;">
+            <img src="{{ url_for('static', filename='img/infraestrutura_portuaria.png') }}" alt="Infraestrutura Portuária"
+                 class="mx-auto d-block" style="height: 80px; object-fit: contain; margin-bottom: 8px;">
+            <div class="small">Infraestrutura Portuária</div>
+          </div>
+        </a>
+      </div>
+
+      <div class="col">
+        <a href="{{ url_for('mapa', indicador='saude') }}" style="text-decoration: none; color: inherit;">
+          <div class="card text-center p-3 shadow-sm" style="height: 160px;">
+            <img src="{{ url_for('static', filename='img/saude.png') }}" alt="Saúde"
+                 class="mx-auto d-block" style="height: 80px; object-fit: contain; margin-bottom: 8px;">
+            <div class="small">Saúde</div>
+          </div>
+        </a>
+      </div>
+
+      <div class="col">
+        <a href="{{ url_for('mapa', indicador='desastres_hidrologicos') }}" style="text-decoration: none; color: inherit;">
+          <div class="card text-center p-3 shadow-sm" style="height: 160px;">
+            <img src="{{ url_for('static', filename='img/desastres_hidrologicos.png') }}" alt="Desastres Hidrológicos"
+                 class="mx-auto d-block" style="height: 80px; object-fit: contain; margin-bottom: 8px;">
+            <div class="small">Desastres Hidrológicos</div>
+          </div>
+        </a>
+      </div>
+
+      <div class="col">
+        <a href="{{ url_for('mapa', indicador='infraestrutura_ferroviaria') }}" style="text-decoration: none; color: inherit;">
+          <div class="card text-center p-3 shadow-sm" style="height: 160px;">
+            <img src="{{ url_for('static', filename='img/infraestrutura_ferroviaria.png') }}" alt="Infraestrutura Ferroviária"
+                 class="mx-auto d-block" style="height: 80px; object-fit: contain; margin-bottom: 8px;">
+            <div class="small">Infraestrutura Ferroviária</div>
+          </div>
+        </a>
+      </div>
+
+      <div class="col">
+        <a href="{{ url_for('mapa', indicador='infraestrutura_rodoviaria') }}" style="text-decoration: none; color: inherit;">
+          <div class="card text-center p-3 shadow-sm" style="height: 160px;">
+            <img src="{{ url_for('static', filename='img/infraestrutura_rodoviaria.png') }}" alt="Infraestrutura Rodoviária"
+                 class="mx-auto d-block" style="height: 80px; object-fit: contain; margin-bottom: 8px;">
+            <div class="small">Infraestrutura Rodoviária</div>
+          </div>
+        </a>
+      </div>
+    </div>
+  </div>
+  </div></div>
+
+{% endblock %}
+
+{% block custom_js %}
+    {{ super() }}
+{% endblock %}
