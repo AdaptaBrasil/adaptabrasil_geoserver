@@ -68,24 +68,26 @@ with psycopg2.connect(**DB_CONFIG) as conn:
                 v.scenario_id,
                 v.year;
         """)
-
+        #Lista de tuplas do select acima
         combinacoes = cur.fetchall()
 
+        #tabela de views
+        cur.execute( """
+            CREATE TABLE IF NOT EXISTS views_adaptabrasil(
+            view_name TEXT PRIMARY KEY,
+            type_geom TEXT, 
+            published BOOLEAN DEFAULT FALSE
+            );
+        """)
+
+        #Da noma para as colunas da lista de tuplas
         for indicator_id, scenario_id, year, shortname in combinacoes:
 
             # Normaliza o shortname
             shortname_limpo = normalizar_nome(shortname)
 
-            # Nome da view
-            view_name = (
-               # f"vw_{shortname_limpo}"
-                f"vw_scn_{scenario_id}"
-                f"_yr_{year}"
-                f"_id_{indicator_id}"
-            )
-
-            sql = f"""
-            CREATE VIEW {view_name} AS
+            #select dos dados para formar a view
+            select = f"""
             SELECT
                 g.name,
                 g.geom,
@@ -105,12 +107,53 @@ with psycopg2.connect(**DB_CONFIG) as conn:
             WHERE
                 v.indicator_id = {indicator_id}
                 AND v.year = {year}
-            """
+                """
             if scenario_id is not None:
-              sql = sql + f""" and v.scenario_id = {scenario_id}"""
-            sql = sql + ";"
+                select = select + f""" and v.scenario_id = {scenario_id}"""
+
+
+            #Pega o tipo de geometria da view
+            type_geom_sql = f"""
+            SELECT ST_GeometryType(geom)
+            FROM ({select}) limit 1;
+            """
+
+            #executa o codigo acima
+            cur.execute(type_geom_sql)
+
+            type_geom = cur.fetchone() [0]
+            #o [0] é pra pegar o primeiro elemento (e unico) da tupla e transformar ela em string
+
+            # Nome da view
+            view_name = (
+               # f"vw_{shortname_limpo}"
+                f"vw_{type_geom}"
+                f"_scn_{scenario_id}"
+                f"_yr_{year}"
+                f"_id_{indicator_id}"
+            )
+
+            sql = f"""
+            CREATE VIEW {view_name} AS
+            {select};
+            """
+
 
             #sql = f"drop view if exists {view_name}"
+
+            #Vulnerável a hackers se os valores das variaveis foram inseridos por usuarios, logo, temos uma opção ,mais segura
+            # SQL injection
+            #cur.execute("""
+            #   INSERT INTO views_adaptabrasil (view_name, type_geom, published)
+            #   VALUES ({view_name}, {type_geom}, FALSE);
+            #""")
+
+            #Muito seguro. Os %s são para cada um dos valores da tupla
+            tupla = (view_name, type_geom)
+            cur.execute("""
+                        INSERT INTO views_adaptabrasil (view_name, type_geom, published) 
+                        VALUES (%s, %s, FALSE);
+                        """, tupla)
 
             print(f"Criando view: {view_name}")
             cur.execute(sql)
