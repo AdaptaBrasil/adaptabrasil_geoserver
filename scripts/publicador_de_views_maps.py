@@ -24,7 +24,7 @@ GEOSERVER_USER = "admin"
 GEOSERVER_PASSWORD = "geoserver"
 
 WORKSPACE = "adaptabrasil"
-DATASTORE = "adaptabrasil"
+DATASTORE = "AdaptaBrasil"
 
 # =====================================
 # MAPEAMENTO DE ESTILOS
@@ -42,7 +42,7 @@ STYLE_MAP = {
 
 def layer_exists(layer_name):
     """
-    Verifica se a layer já existe.
+    Verifica se a layer já existe no GeoServer.
     """
 
     url = (
@@ -63,7 +63,7 @@ def layer_exists(layer_name):
 
 def publish_layer(layer_name):
     """
-    Publica uma view do PostGIS.
+    Publica uma view do PostGIS como layer no GeoServer.
     """
 
     url = (
@@ -75,7 +75,56 @@ def publish_layer(layer_name):
     payload = {
         "featureType": {
             "name": layer_name,
-            "nativeName": layer_name
+            "nativeName": layer_name,
+            'attributes': {'attribute': [{'binding': 'java.lang.String',
+                                           'maxOccurs': 1,
+                                           'minOccurs': 0,
+                                           'name': 'name',
+                                           'nillable': True},
+                                          {'binding': 'org.locationtech.jts.geom.Geometry',
+                                           'maxOccurs': 1,
+                                           'minOccurs': 0,
+                                           'name': 'geom',
+                                           'nillable': True},
+                                          {'binding': 'java.lang.Double',
+                                           'maxOccurs': 1,
+                                           'minOccurs': 0,
+                                           'name': 'value',
+                                           'nillable': True},
+                                          {'binding': 'java.lang.String',
+                                           'maxOccurs': 1,
+                                           'minOccurs': 0,
+                                           'name': 'CLASSE',
+                                           'nillable': True}]},
+            'latLonBoundingBox': {'crs': 'EPSG:4326',
+                                  'maxx': -28.835907628999966,
+                                  'maxy': 5.271841077172965,
+                                  'minx': -73.99044996899995,
+                                  'miny': -33.751177994239676},
+            'nativeBoundingBox': {'crs': 'EPSG:4326',
+                                  'maxx': -28.835907628999966,
+                                  'maxy': 5.271841077172965,
+                                  'minx': -73.99044996899995,
+                                  'miny': -33.751177994239676},
+            'srs': 'EPSG:4326',
+            'internationalAbstract': '',
+            'internationalTitle': '',
+            'metadata': {'entry': {'$': 'false',
+                                   '@key': 'cachingEnabled'}},
+            'nativeCRS': 'GEOGCS["WGS 84", \r\n'
+                         '  DATUM["World Geodetic System 1984", \r\n'
+                         '    SPHEROID["WGS 84", 6378137.0, '
+                         '298.257223563, AUTHORITY["EPSG","7030"]], \r\n'
+                         '    AUTHORITY["EPSG","6326"]], \r\n'
+                         '  PRIMEM["Greenwich", 0.0, '
+                         'AUTHORITY["EPSG","8901"]], \r\n'
+                         '  UNIT["degree", 0.017453292519943295], \r\n'
+                         '  AXIS["Geodetic longitude", EAST], \r\n'
+                         '  AXIS["Geodetic latitude", NORTH], \r\n'
+                         '  AUTHORITY["EPSG","4326"]]',
+            'simpleConversionEnabled': False,
+
+
         }
     }
 
@@ -92,14 +141,14 @@ def publish_layer(layer_name):
     )
 
     print(
-        f"Publicação {layer_name}: "
+        f"Publicação de {layer_name}: "
         f"{response.status_code}"
     )
 
 
 def apply_style(layer_name, style_name):
     """
-    Define o estilo padrão da layer.
+    Aplica o estilo padrão à layer.
     """
 
     url = (
@@ -134,32 +183,37 @@ def apply_style(layer_name, style_name):
 
 
 # =====================================
-# PROCESSAMENTO
+# BUSCA AS VIEWS NO BANCO
 # =====================================
 
 with psycopg2.connect(**DB_CONFIG) as conn:
 
     with conn.cursor() as cur:
 
-        # ALTERE PARA SUA TABELA
         cur.execute("""
             SELECT
                 view_name,
-                geom_type
-            FROM layer_metadata
+                type_geom
+            FROM views_adaptabrasil
+            where published = FALSE
         """)
 
         layers = cur.fetchall()
 
-for layer_name, geom_type in layers:
+# =====================================
+# PUBLICAÇÃO DAS LAYERS
+# =====================================
 
-    style_name = STYLE_MAP.get(geom_type)
+for layer_name, type_geom in layers:
+
+    style_name = STYLE_MAP.get(type_geom)
+    layer_name = layer_name.lower() #as tabelas no postgres são sempre criadas com minusculo
 
     if not style_name:
 
         print(
             f"Geometria não mapeada: "
-            f"{geom_type}"
+            f"{type_geom}"
         )
         continue
 
@@ -168,6 +222,17 @@ for layer_name, geom_type in layers:
         if not layer_exists(layer_name):
 
             publish_layer(layer_name)
+
+            with psycopg2.connect(**DB_CONFIG) as conn:
+                with conn.cursor() as cur:
+                    tupla = (layer_name,)
+
+                    cur.execute("""
+                                UPDATE views_adaptabrasil
+                                SET published = TRUE
+                                WHERE view_name = %s;
+                                """, tupla)
+
 
         apply_style(
             layer_name,
