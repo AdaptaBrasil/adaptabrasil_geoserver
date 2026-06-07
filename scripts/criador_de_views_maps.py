@@ -149,7 +149,7 @@ with psycopg2.connect(**DB_CONFIG) as conn:
             #""")
 
             #Muito seguro. Os %s são para cada um dos valores da tupla
-            tupla = (view_name, type_geom)
+            tupla = (view_name.lower(), type_geom)
             cur.execute("""
                         INSERT INTO views_adaptabrasil (view_name, type_geom, published) 
                         VALUES (%s, %s, FALSE);

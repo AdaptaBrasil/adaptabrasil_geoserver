@@ -207,7 +207,7 @@ with psycopg2.connect(**DB_CONFIG) as conn:
 for layer_name, type_geom in layers:
 
     style_name = STYLE_MAP.get(type_geom)
-    layer_name = layer_name.lower() #as tabelas no postgres são sempre criadas com minusculo
+    #layer_name = layer_name.lower() #as tabelas no postgres são sempre criadas com minusculo
 
     if not style_name:
 
