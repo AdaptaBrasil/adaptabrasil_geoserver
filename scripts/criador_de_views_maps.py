@@ -80,7 +80,7 @@ with psycopg2.connect(**DB_CONFIG) as conn:
             );
         """)
 
-        #Da noma para as colunas da lista de tuplas
+        #Da nome para as colunas da lista de tuplas
         for indicator_id, scenario_id, year, shortname in combinacoes:
 
             # Normaliza o shortname
