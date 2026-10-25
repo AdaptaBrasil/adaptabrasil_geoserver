@@ -38,13 +38,15 @@ def normalizar_nome(texto: str) -> str:
 # CONFIGURAÇÃO DO BANCO
 # =========================
 DB_CONFIG = {
-    "host": "localhost",
+    "host": "3.224.52.81",
     "database": "adaptabrasil",
-    "user": "adaptabrasil",
-    "password": "",
-    "port": "5432"
+    "user": "adaptabrasil_user",
+    "password": "142857",
+    "port": "6543",
+    "options": "-c search_path=adaptabrasil_aluana,public",
 }
 
+SCHEMA = "adaptabrasil_aluana"
 
 # =========================
 # CONEXÃO
@@ -72,8 +74,8 @@ with psycopg2.connect(**DB_CONFIG) as conn:
         combinacoes = cur.fetchall()
 
         #tabela de views
-        cur.execute( """
-            CREATE TABLE IF NOT EXISTS views_adaptabrasil(
+        cur.execute( f"""
+            CREATE TABLE IF NOT EXISTS {SCHEMA}.views_adaptabrasil(
             view_name TEXT PRIMARY KEY,
             type_geom TEXT, 
             published BOOLEAN DEFAULT FALSE
@@ -134,7 +136,7 @@ with psycopg2.connect(**DB_CONFIG) as conn:
             )
 
             sql = f"""
-            CREATE VIEW {view_name} AS
+            CREATE VIEW {SCHEMA}.{view_name} AS
             {select};
             """
 
@@ -150,8 +152,8 @@ with psycopg2.connect(**DB_CONFIG) as conn:
 
             #Muito seguro. Os %s são para cada um dos valores da tupla
             tupla = (view_name.lower(), type_geom)
-            cur.execute("""
-                        INSERT INTO views_adaptabrasil (view_name, type_geom, published) 
+            cur.execute(f"""
+                        INSERT INTO {SCHEMA}.views_adaptabrasil (view_name, type_geom, published)
                         VALUES (%s, %s, FALSE);
                         """, tupla)
 
