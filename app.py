@@ -6,7 +6,7 @@ CORS(app)
 @app.route('/')
 def homepage():
     return render_template("home.html", map_layer=
-        "adaptabrasil:vw_indice_de_risco_de_impacto_do_estresse_hidrico")
+        "adaptabrasil:vw_st_multipolygon_scn_none_yr_2020_id_2")
 
 @app.route('/mapa')
 def mapa():
