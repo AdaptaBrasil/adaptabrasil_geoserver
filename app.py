@@ -22,12 +22,9 @@ def teste():
 def rascunho():
     return render_template('rascunho.html')
 
-if __name__ == '__main__':
-    app.run()
-
 @app.route('/basemapa')
-def rascunho():
+def basemapa():
     return render_template('basemapa.html')
 
 if __name__ == '__main__':
-    app.run()
+    app.run(host='0.0.0.0', port=5000, debug=False)
