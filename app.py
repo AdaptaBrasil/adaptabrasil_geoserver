@@ -6,7 +6,7 @@ CORS(app)
 @app.route('/')
 def homepage():
     return render_template("home.html", map_layer=
-        "adaptabrasil:vw_st_multipolygon_scn_none_yr_2020_id_2")
+        "adaptabrasil:mapa_cinza")
 
 @app.route('/mapa')
 def mapa():
