@@ -5,3 +5,6 @@ __pycache__/
 
 # Saída do configurar_geoserver.py --simular
 scripts/saida_geoserver/
+
+# Backup do limpar_legado.py
+backup_legado/

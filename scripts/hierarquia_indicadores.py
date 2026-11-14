@@ -24,17 +24,19 @@ sys.stdout.reconfigure(encoding="utf-8")
 # =========================
 def buscar_filhos(cur):
     """
-    Busca cada botão da barra lateral (detail) com seu respectivo antecessor (master)
+    Busca cada botão da barra lateral (id) com seu respectivo antecessor (master)
+    na materialized view mv_hierarchy
     e devolve um dicionário de cada pai com a lista dos seus filhos.
     """
     cur.execute("""
         SELECT
-            ii.indicator_id_master,
-            ii.indicator_id_detail
-        FROM indicator_indicator ii
+            h.indicator_id_master,
+            h.id
+        FROM mv_hierarchy h
+        WHERE h.indicator_id_master IS NOT NULL
         ORDER BY
-            ii.indicator_id_master,
-            ii.indicator_id_detail;
+            h.indicator_id_master,
+            h.id;
     """)
 
     filhos = defaultdict(list)
@@ -48,7 +50,7 @@ def buscar_nomes(cur):
     """
     Devolve um dicionário id -> shortname de todos os indicadores.
     """
-    cur.execute("SELECT id, shortname FROM indicator;")
+    cur.execute("SELECT id, shortname FROM mv_hierarchy;")
     return dict(cur.fetchall())
 
 

@@ -61,6 +61,10 @@ def geoserver_config():
 # Layer única do GeoServer: uma SQL view parametrizada por indicador, ano e cenário
 GEOSERVER_LAYER = os.getenv("ADAPTABRASIL_GEOSERVER_LAYER", "indicador")
 
+# Layer de fundo (municípios em cinza), também uma SQL view, e o estilo dela
+GEOSERVER_LAYER_FUNDO = "mapa_cinza"
+GEOSERVER_ESTILO_FUNDO = "mapa_cinza"
+
 # Prefixo dos estilos gerados a partir da tabela legend_items (um por legenda)
 GEOSERVER_PREFIXO_ESTILO = "adaptabrasil_legenda_"
 

@@ -15,8 +15,8 @@ SCHEMA = config.DB_SCHEMA
 # URL do WMS do GeoServer, disponível em todos os templates
 GEOSERVER_WMS_URL = config.geoserver_wms_url()
 
-# Layer padrão enquanto o indicador não tem uma layer própria no GeoServer
-LAYER_PADRAO = "adaptabrasil:mapa_cinza"
+# Layer de fundo (municípios em cinza), também usada nas páginas sem indicador
+LAYER_PADRAO = f"{config.geoserver_workspace()}:{config.GEOSERVER_LAYER_FUNDO}"
 
 # Indicadores da home: título exibido na página e indicador raiz da árvore
 # (filho de master = 0 em indicator_indicator)
@@ -48,28 +48,29 @@ def conectar():
 @lru_cache(maxsize=1)
 def carregar_indicadores():
     """
-    Lê uma vez a tabela indicator e a hierarquia indicator_indicator.
-    Os dados mudam raramente; reinicie o app para recarregar.
+    Lê uma vez os indicadores e a hierarquia da materialized view mv_hierarchy.
+
+    Ela traz um registro por indicador, com o pai (indicator_id_master), e só
+    inclui os temas (sep) visíveis. Os dados mudam raramente; depois de um
+    REFRESH MATERIALIZED VIEW mv_hierarchy, reinicie o app para recarregar.
     """
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(f"""
-            SELECT id, shortname, title, legend_id
-            FROM {SCHEMA}.indicator
+            SELECT id, shortname, title, legend_id, level, indicator_id_master,
+                   years, geometrytype
+            FROM {SCHEMA}.mv_hierarchy
+            ORDER BY indicator_id_master, id
         """)
-        indicadores = {
-            id_: {"id": id_, "nome": shortname, "titulo": title,
-                  "legenda": legend_id or config.LEGENDA_PADRAO}
-            for id_, shortname, title, legend_id in cur.fetchall()
-        }
-
-        cur.execute(f"""
-            SELECT indicator_id_master, indicator_id_detail
-            FROM {SCHEMA}.indicator_indicator
-            ORDER BY indicator_id_master, indicator_id_detail
-        """)
+        indicadores = {}
         filhos = defaultdict(list)
-        for master, detail in cur.fetchall():
-            filhos[master].append(detail)
+        for id_, shortname, title, legend_id, level, master, years, geometria in cur.fetchall():
+            indicadores[id_] = {
+                "id": id_, "nome": shortname, "titulo": title,
+                "legenda": legend_id or config.LEGENDA_PADRAO,
+                "nivel": level, "anos": years or [], "geometria": geometria,
+            }
+            if master is not None:
+                filhos[master].append(id_)
 
     return indicadores, filhos
 

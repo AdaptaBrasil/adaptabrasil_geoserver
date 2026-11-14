@@ -8,7 +8,9 @@ indicador, cenário e ano, o GeoServer passa a ter:
     com os parâmetros indicador, ano e cenario. O navegador escolhe o recorte
     em cada requisição, com VIEWPARAMS=indicador:2;ano:2020;cenario:0;
   - um estilo por legenda da tabela legend_items
-    (config.GEOSERVER_PREFIXO_ESTILO + id), escolhido com STYLES=.
+    (config.GEOSERVER_PREFIXO_ESTILO + id), escolhido com STYLES=;
+  - a layer de fundo (config.GEOSERVER_LAYER_FUNDO), também uma SQL view,
+    com os municípios da tabela geoobject e o estilo cinza que já existe.
 
 Cenário 0 significa "sem cenário" (scenario_id nulo, o dado do presente).
 
@@ -37,6 +39,7 @@ AUTH = HTTPBasicAuth(GEOSERVER["user"], GEOSERVER["password"])
 WORKSPACE = GEOSERVER["workspace"]
 DATASTORE = GEOSERVER["datastore"]
 LAYER = config.GEOSERVER_LAYER
+LAYER_FUNDO = config.GEOSERVER_LAYER_FUNDO
 SCHEMA = config.DB_SCHEMA
 
 PASTA_SIMULACAO = Path(__file__).resolve().parent / "saida_geoserver"
@@ -65,9 +68,14 @@ WHERE v.indicator_id = %indicador%
   AND v.year = %ano%
   AND (v.scenario_id = %cenario% OR (%cenario% = 0 AND v.scenario_id IS NULL))"""
 
+# Fundo: os municípios (geoobjecttype_id = 1), sem parâmetros
+SQL_FUNDO = f"""SELECT g.id, g.name, g.geom
+FROM {SCHEMA}.geoobject g
+WHERE g.geoobjecttype_id = 1"""
+
 
 # =====================================
-# XML DA LAYER
+# XML DAS LAYERS
 # =====================================
 
 def _bbox_xml(tag):
@@ -75,19 +83,20 @@ def _bbox_xml(tag):
     return f"<{tag}>{coords}<crs>EPSG:4326</crs></{tag}>"
 
 
-def featuretype_xml():
-    parametros = "".join(
+def featuretype_xml(nome, titulo, resumo, sql, chave, parametros=()):
+    """FeatureType de uma SQL view do GeoServer (JDBC_VIRTUAL_TABLE)."""
+    params = "".join(
         "<parameter>"
-        f"<name>{nome}</name><defaultValue>{padrao}</defaultValue>"
+        f"<name>{p}</name><defaultValue>{padrao}</defaultValue>"
         f"<regexpValidator>{escape(regex)}</regexpValidator>"
         "</parameter>"
-        for nome, padrao, regex in PARAMETROS
+        for p, padrao, regex in parametros
     )
     return f"""<featureType>
-  <name>{LAYER}</name>
-  <nativeName>{LAYER}</nativeName>
-  <title>Indicadores AdaptaBrasil</title>
-  <abstract>Valor de um indicador por geoobjeto. Parâmetros: indicador, ano e cenario (0 = sem cenário).</abstract>
+  <name>{nome}</name>
+  <nativeName>{nome}</nativeName>
+  <title>{escape(titulo)}</title>
+  <abstract>{escape(resumo)}</abstract>
   <srs>EPSG:4326</srs>
   <projectionPolicy>FORCE_DECLARED</projectionPolicy>
   {_bbox_xml("nativeBoundingBox")}
@@ -96,20 +105,32 @@ def featuretype_xml():
   <metadata>
     <entry key="JDBC_VIRTUAL_TABLE">
       <virtualTable>
-        <name>{LAYER}</name>
-        <sql>{escape(SQL_VIEW)}</sql>
+        <name>{nome}</name>
+        <sql>{escape(sql)}</sql>
         <escapeSql>false</escapeSql>
-        <keyColumn>geoobject_id</keyColumn>
+        <keyColumn>{chave}</keyColumn>
         <geometry><name>geom</name><type>Geometry</type><srid>4326</srid></geometry>
-        {parametros}
+        {params}
       </virtualTable>
     </entry>
   </metadata>
 </featureType>"""
 
 
-def layer_xml(estilos):
-    padrao = f"{config.GEOSERVER_PREFIXO_ESTILO}{config.LEGENDA_PADRAO}"
+def featuretype_indicador():
+    return featuretype_xml(
+        LAYER, "Indicadores AdaptaBrasil",
+        "Valor de um indicador por geoobjeto. Parâmetros: indicador, ano e cenario (0 = sem cenário).",
+        SQL_VIEW, "geoobject_id", PARAMETROS,
+    )
+
+
+def featuretype_fundo():
+    return featuretype_xml(LAYER_FUNDO, "Municípios (fundo)", "Municípios do Brasil, fundo cinza do mapa.",
+                           SQL_FUNDO, "id")
+
+
+def layer_xml(padrao, estilos=()):
     outros = "".join(
         f"<style><name>{e}</name><workspace>{WORKSPACE}</workspace></style>" for e in estilos
     )
@@ -169,19 +190,42 @@ def salvar_estilo(nome, conteudo_sld):
         print(f"Estilo criado: {nome}")
 
 
-def salvar_layer(estilos):
-    base = f"workspaces/{WORKSPACE}/datastores/{DATASTORE}/featuretypes"
-    if _existe(f"{base}/{LAYER}.json"):
-        # recalculate atualiza os atributos se o SQL mudou
-        _enviar("PUT", f"{base}/{LAYER}", featuretype_xml(), "text/xml",
-                params={"recalculate": "nativebbox,latlonbbox"})
-        print(f"Layer atualizada: {WORKSPACE}:{LAYER}")
-    else:
-        _enviar("POST", base, featuretype_xml(), "text/xml")
-        print(f"Layer criada: {WORKSPACE}:{LAYER}")
+def _eh_sql_view(caminho):
+    resposta = requests.get(f"{REST}/{caminho}.json", auth=AUTH, timeout=30)
+    return "JDBC_VIRTUAL_TABLE" in resposta.text
 
-    _enviar("PUT", f"layers/{WORKSPACE}:{LAYER}", layer_xml(estilos), "text/xml")
-    print(f"Estilos associados à layer: {len(estilos)}")
+
+def salvar_featuretype(nome, xml):
+    base = f"workspaces/{WORKSPACE}/datastores/{DATASTORE}/featuretypes"
+    caminho = f"{base}/{nome}"
+
+    if _existe(f"{caminho}.json") and not _eh_sql_view(caminho):
+        # Layer antiga publicada a partir de uma tabela ou view do banco
+        # (era o caso do mapa_cinza). O GeoServer não troca a origem de uma
+        # layer existente, então ela é removida e criada de novo, com o mesmo nome.
+        resposta = requests.delete(f"{REST}/{caminho}", auth=AUTH, params={"recurse": "true"}, timeout=120)
+        if resposta.status_code != 200:
+            raise RuntimeError(f"DELETE {caminho}: {resposta.status_code} {resposta.text[:500]}")
+        print(f"Layer antiga removida para ser recriada como SQL view: {WORKSPACE}:{nome}")
+
+    if _existe(f"{caminho}.json"):
+        # recalculate atualiza os atributos se o SQL mudou
+        _enviar("PUT", caminho, xml, "text/xml", params={"recalculate": "nativebbox,latlonbbox"})
+        print(f"Layer atualizada: {WORKSPACE}:{nome}")
+    else:
+        _enviar("POST", base, xml, "text/xml")
+        print(f"Layer criada: {WORKSPACE}:{nome}")
+
+
+def salvar_layers(estilos):
+    salvar_featuretype(LAYER, featuretype_indicador())
+    padrao = f"{config.GEOSERVER_PREFIXO_ESTILO}{config.LEGENDA_PADRAO}"
+    _enviar("PUT", f"layers/{WORKSPACE}:{LAYER}", layer_xml(padrao, estilos), "text/xml")
+    print(f"Estilos associados à layer {LAYER}: {len(estilos)}")
+
+    salvar_featuretype(LAYER_FUNDO, featuretype_fundo())
+    _enviar("PUT", f"layers/{WORKSPACE}:{LAYER_FUNDO}", layer_xml(config.GEOSERVER_ESTILO_FUNDO), "text/xml")
+    print(f"Estilo {config.GEOSERVER_ESTILO_FUNDO} associado à layer {LAYER_FUNDO}")
 
 
 # =====================================
@@ -205,15 +249,17 @@ def main():
         PASTA_SIMULACAO.mkdir(exist_ok=True)
         for nome, conteudo in estilos.items():
             (PASTA_SIMULACAO / f"{nome}.sld").write_text(conteudo, encoding="utf-8")
-        (PASTA_SIMULACAO / f"{LAYER}_featuretype.xml").write_text(featuretype_xml(), encoding="utf-8")
-        (PASTA_SIMULACAO / f"{LAYER}_layer.xml").write_text(layer_xml(estilos), encoding="utf-8")
-        print(f"{len(estilos)} estilos e a layer {LAYER} gravados em {PASTA_SIMULACAO}")
+        (PASTA_SIMULACAO / f"{LAYER}_featuretype.xml").write_text(featuretype_indicador(), encoding="utf-8")
+        (PASTA_SIMULACAO / f"{LAYER_FUNDO}_featuretype.xml").write_text(featuretype_fundo(), encoding="utf-8")
+        print(f"{len(estilos)} estilos e as layers {LAYER} e {LAYER_FUNDO} gravados em {PASTA_SIMULACAO}")
         return
 
     print(f"GeoServer: {REST} (workspace {WORKSPACE}, datastore {DATASTORE})")
+    if not _existe(f"workspaces/{WORKSPACE}/styles/{config.GEOSERVER_ESTILO_FUNDO}.json"):
+        sys.exit(f"O estilo {config.GEOSERVER_ESTILO_FUNDO} da layer de fundo não existe no GeoServer.")
     for nome, conteudo in estilos.items():
         salvar_estilo(nome, conteudo)
-    salvar_layer(list(estilos))
+    salvar_layers(list(estilos))
     print("GeoServer configurado.")
 
 
