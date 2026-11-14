@@ -2,6 +2,8 @@ import re
 import unicodedata
 import psycopg2
 
+import config
+
 
 # =========================
 # FUNÇÃO PARA NORMALIZAR TEXTO
@@ -37,16 +39,9 @@ def normalizar_nome(texto: str) -> str:
 # =========================
 # CONFIGURAÇÃO DO BANCO
 # =========================
-DB_CONFIG = {
-    "host": "3.224.52.81",
-    "database": "adaptabrasil",
-    "user": "adaptabrasil_user",
-    "password": "142857",
-    "port": "6543",
-    "options": "-c search_path=adaptabrasil_aluana,public",
-}
+DB_CONFIG = config.db_config()
 
-SCHEMA = "adaptabrasil_aluana"
+SCHEMA = config.DB_SCHEMA
 
 # =========================
 # CONEXÃO

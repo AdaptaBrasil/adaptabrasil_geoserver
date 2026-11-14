@@ -2,32 +2,29 @@ import psycopg2
 import requests
 from requests.auth import HTTPBasicAuth
 
+import config
+
 # =====================================
 # CONFIGURAÇÕES POSTGRES
 # =====================================
 
-DB_CONFIG = {
-    "host": "3.224.52.81",
-    "database": "adaptabrasil",
-    "user": "adaptabrasil_user",
-    "password": "142857",
-    "port": "6543",
-    "options": "-c search_path=adaptabrasil_aluana,public",
-}
+DB_CONFIG = config.db_config()
 
-SCHEMA = "adaptabrasil_aluana"
+SCHEMA = config.DB_SCHEMA
 
 # =====================================
 # CONFIGURAÇÕES GEOSERVER
 # =====================================
 
-GEOSERVER_URL = "http://localhost:8081/geoserver"
+GEOSERVER = config.geoserver_config()
 
-GEOSERVER_USER = "admin"
-GEOSERVER_PASSWORD = "geoserver"
+GEOSERVER_URL = GEOSERVER["url"]
 
-WORKSPACE = "adaptabrasil"
-DATASTORE = "adaptabrasil"
+GEOSERVER_USER = GEOSERVER["user"]
+GEOSERVER_PASSWORD = GEOSERVER["password"]
+
+WORKSPACE = GEOSERVER["workspace"]
+DATASTORE = GEOSERVER["datastore"]
 
 # =====================================
 # MAPEAMENTO DE ESTILOS

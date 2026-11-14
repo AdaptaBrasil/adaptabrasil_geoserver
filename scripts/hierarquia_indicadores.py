@@ -1,17 +1,109 @@
+import sys
+from collections import defaultdict
+from pprint import pprint
+
 import psycopg2
+
+import config
 
 # =====================================
 # CONFIGURAÇÕES POSTGRES
 # =====================================
 
-DB_CONFIG = {
-    "host": "3.224.52.81",
-    "database": "adaptabrasil",
-    "user": "adaptabrasil_user",
-    "password": "142857",
-    "port": "6543",
-    "options": "-c search_path=adaptabrasil_aluana,public",
-}
+DB_CONFIG = config.db_config()
+
+# Os botões do primeiro nível da barra lateral têm master = 0
+RAIZ = 0
+
+# Garante que os caracteres da árvore (├── └──) saiam no console do Windows
+sys.stdout.reconfigure(encoding="utf-8")
+
+
+# =========================
+# FUNÇÕES
+# =========================
+def buscar_filhos(cur):
+    """
+    Busca cada botão da barra lateral (detail) com seu respectivo antecessor (master)
+    e devolve um dicionário de cada pai com a lista dos seus filhos.
+    """
+    cur.execute("""
+        SELECT
+            ii.indicator_id_master,
+            ii.indicator_id_detail
+        FROM indicator_indicator ii
+        ORDER BY
+            ii.indicator_id_master,
+            ii.indicator_id_detail;
+    """)
+
+    filhos = defaultdict(list)
+    for master, detail in cur.fetchall():
+        filhos[master].append(detail)
+
+    return filhos
+
+
+def buscar_nomes(cur):
+    """
+    Devolve um dicionário id -> shortname de todos os indicadores.
+    """
+    cur.execute("SELECT id, shortname FROM indicator;")
+    return dict(cur.fetchall())
+
+
+def percorrer(filhos, master, resultado, visitados):
+    """
+    Percorre a árvore a partir de master, adicionando em resultado cada
+    tupla (master, detail), com cada filho logo depois do seu pai.
+    Ignora indicadores já visitados, para não entrar em laço infinito
+    se a tabela tiver um ciclo (A -> B -> A).
+    """
+    for detail in filhos[master]:
+        if detail in visitados:
+            print(f"Aviso: ciclo ou repetição em {master} -> {detail}, ignorado")
+            continue
+
+        visitados.add(detail)
+        resultado.append((master, detail))
+        percorrer(filhos, detail, resultado, visitados)
+
+
+def rotulo(no, nomes):
+    """
+    Texto exibido para um indicador: id seguido do shortname.
+    """
+    return f"{no} - {nomes.get(no, '(sem nome)')}"
+
+
+def imprimir_arvore(no, filhos, nomes, prefixo="", eh_ultimo=True, eh_raiz=False):
+
+    if eh_raiz:
+        print(rotulo(no, nomes))
+    else:
+        conector = "└── " if eh_ultimo else "├── "
+        print(prefixo + conector + rotulo(no, nomes))
+
+    filhos_do_no = filhos[no]
+
+    for i, filho in enumerate(filhos_do_no):
+        ultimo_filho = i == len(filhos_do_no) - 1
+
+        if eh_raiz:
+            novo_prefixo = ""
+        else:
+            novo_prefixo = prefixo + (
+                "    " if eh_ultimo else "│   "
+            )
+
+        imprimir_arvore(
+            filho,
+            filhos,
+            nomes,
+            novo_prefixo,
+            ultimo_filho,
+            False
+        )
 
 
 # =========================
@@ -20,95 +112,27 @@ DB_CONFIG = {
 with psycopg2.connect(**DB_CONFIG) as conn:
 
     with conn.cursor() as cur:
+        filhos_banco = buscar_filhos(cur)
+        nomes = buscar_nomes(cur)
 
-        # Busca cada botão da barra lateral (detail) com seu respectivo antecessor (master)
-        cur.execute("""
-            SELECT
-                ii.indicator_id_master,
-                ii.indicator_id_detail
-            FROM indicator_indicator ii;
-        """)
-        #Lista de tuplas do select acima
-        combinacoes = cur.fetchall()
+# Lista de tuplas (master, detail) na ordem da árvore
+resultado = []
+percorrer(filhos_banco, RAIZ, resultado, set())
 
-        #Cria um dicionário de cada pais com seus respectivos filhos
-        from collections import defaultdict
+pprint(resultado)
 
-        filhos = defaultdict(list)
+# Monta a relação master -> filhos só com o que foi alcançado a partir da raiz
+filhos = defaultdict(list)
+for master, detail in resultado:
+    filhos[master].append(detail)
 
-        for master, detail in combinacoes:
-            filhos[master].append((master, detail))
+# Cada nó com master = 0 é a raiz de uma árvore
+for raiz in filhos[RAIZ]:
+    imprimir_arvore(
+        raiz,
+        filhos,
+        nomes,
+        eh_raiz=True
+    )
 
-        resultado = []
-
-
-        #definição da função percorrer, que ordena cada filho seguido do seu pai, para depois adicionar na variavel resultado, que é uma lista de tuplas
-        def percorrer(master, nivel) :
-            nivel+= 1
-            for tupla in filhos[master]:
-                resultado.append(tupla)
-
-                detail = tupla[1]
-                percorrer(detail, nivel)
-
-        #executa a função percorrer
-        percorrer(0)
-
-        from pprint import pprint
-        pprint(resultado)
-
-
-
-
-        from collections import defaultdict
-
-        # Cria a relação master -> filhos
-        filhos = defaultdict(list)
-
-        # Usa DIRETAMENTE a lista resultado
-        for master, detail in resultado:
-            filhos[master].append(detail)
-
-
-        def imprimir_arvore(no, prefixo="", eh_ultimo=True, eh_raiz=False):
-
-            if eh_raiz:
-                print(no)
-            else:
-                conector = "└── " if eh_ultimo else "├── "
-                print(prefixo + conector + str(no))
-
-            filhos_do_no = filhos[no]
-
-            for i, filho in enumerate(filhos_do_no):
-                ultimo_filho = i == len(filhos_do_no) - 1
-
-                if eh_raiz:
-                    novo_prefixo = ""
-                else:
-                    novo_prefixo = prefixo + (
-                        "    " if eh_ultimo else "│   "
-                    )
-
-                imprimir_arvore(
-                    filho,
-                    novo_prefixo,
-                    ultimo_filho,
-                    False
-                )
-
-
-        # Encontra os nós que têm master = 0
-        raizes = filhos[0]
-
-        for raiz in raizes:
-            imprimir_arvore(
-                raiz,
-                eh_raiz=True
-            )
-
-
-        print (len(resultado))
-
-
-
+print(len(resultado))
