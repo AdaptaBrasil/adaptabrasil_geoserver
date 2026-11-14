@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/AdaptaBrasilWebServer.iml" filepath="$PROJECT_DIR$/.idea/AdaptaBrasilWebServer.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/adaptabrasil_geoserver.iml" filepath="$PROJECT_DIR$/.idea/adaptabrasil_geoserver.iml" />
     </modules>
   </component>
 </project>
