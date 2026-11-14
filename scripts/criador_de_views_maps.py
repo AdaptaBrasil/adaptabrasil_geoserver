@@ -94,11 +94,12 @@ with psycopg2.connect(**DB_CONFIG) as conn:
                 v.value,
                 CASE
                     WHEN v.value IS NULL THEN 'Dado indisponível'
-                    WHEN v.value >= 0.00 AND v.value <= 0.19 THEN 'Muito baixo'
-                    WHEN v.value >= 0.20 AND v.value <= 0.39 THEN 'Baixo'
-                    WHEN v.value >= 0.40 AND v.value <= 0.59 THEN 'Medio'
-                    WHEN v.value >= 0.60 AND v.value <= 0.79 THEN 'Alto'
-                    WHEN v.value >= 0.80 AND v.value <= 1.00 THEN 'Muito alto'
+                    WHEN v.value < 0.00 THEN 'Fora do intervalo'
+                    WHEN v.value < 0.20 THEN 'Muito baixo'
+                    WHEN v.value < 0.40 THEN 'Baixo'
+                    WHEN v.value < 0.60 THEN 'Medio'
+                    WHEN v.value < 0.80 THEN 'Alto'
+                    WHEN v.value <= 1.00 THEN 'Muito alto'
                     ELSE 'Fora do intervalo'
                 END AS "CLASSE"
             FROM value v
@@ -110,6 +111,8 @@ with psycopg2.connect(**DB_CONFIG) as conn:
                 """
             if scenario_id is not None:
                 select = select + f""" and v.scenario_id = {scenario_id}"""
+            else:
+                select = select + """ and v.scenario_id IS NULL"""
 
 
             #Pega o tipo de geometria da view
@@ -121,7 +124,17 @@ with psycopg2.connect(**DB_CONFIG) as conn:
             #executa o codigo acima
             cur.execute(type_geom_sql)
 
-            type_geom = cur.fetchone() [0]
+            resultado = cur.fetchone()
+
+            # Sem linhas ou geometria nula: não há mapa para essa combinação
+            if resultado is None or resultado[0] is None:
+                print(
+                    f"Sem geometria, view ignorada: indicador {indicator_id}, "
+                    f"cenário {scenario_id}, ano {year}"
+                )
+                continue
+
+            type_geom = resultado[0]
             #o [0] é pra pegar o primeiro elemento (e unico) da tupla e transformar ela em string
 
             # Nome da view
@@ -134,7 +147,7 @@ with psycopg2.connect(**DB_CONFIG) as conn:
             )
 
             sql = f"""
-            CREATE VIEW {view_name} AS
+            CREATE OR REPLACE VIEW {view_name} AS
             {select};
             """
 
@@ -152,7 +165,8 @@ with psycopg2.connect(**DB_CONFIG) as conn:
             tupla = (view_name.lower(), type_geom)
             cur.execute("""
                         INSERT INTO views_adaptabrasil (view_name, type_geom, published) 
-                        VALUES (%s, %s, FALSE);
+                        VALUES (%s, %s, FALSE)
+                        ON CONFLICT (view_name) DO NOTHING;
                         """, tupla)
 
             print(f"Criando view: {view_name}")

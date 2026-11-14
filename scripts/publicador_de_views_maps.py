@@ -32,7 +32,10 @@ DATASTORE = "AdaptaBrasil"
 
 STYLE_MAP = {
     "ST_Point": "adaptabrasil_point",
+    "ST_MultiPoint": "adaptabrasil_point",
+    "ST_LineString": "adaptabrasil_line",
     "ST_MultiLineString": "adaptabrasil_line",
+    "ST_Polygon": "adaptabrasil_polygon",
     "ST_MultiPolygon": "adaptabrasil_polygon"
 }
 
@@ -145,6 +148,13 @@ def publish_layer(layer_name):
         f"{response.status_code}"
     )
 
+    # O GeoServer responde 201 (Created) quando a publicação dá certo
+    if response.status_code != 201:
+        print(f"Falha ao publicar {layer_name}: {response.text}")
+        return False
+
+    return True
+
 
 def apply_style(layer_name, style_name):
     """
@@ -221,17 +231,20 @@ for layer_name, type_geom in layers:
 
         if not layer_exists(layer_name):
 
-            publish_layer(layer_name)
+            if not publish_layer(layer_name):
+                # Continua com published = FALSE para tentar de novo na próxima execução
+                continue
 
-            with psycopg2.connect(**DB_CONFIG) as conn:
-                with conn.cursor() as cur:
-                    tupla = (layer_name,)
+        # Marca como publicada: acabou de ser publicada ou já existia no GeoServer
+        with psycopg2.connect(**DB_CONFIG) as conn:
+            with conn.cursor() as cur:
+                tupla = (layer_name,)
 
-                    cur.execute("""
-                                UPDATE views_adaptabrasil
-                                SET published = TRUE
-                                WHERE view_name = %s;
-                                """, tupla)
+                cur.execute("""
+                            UPDATE views_adaptabrasil
+                            SET published = TRUE
+                            WHERE view_name = %s;
+                            """, tupla)
 
 
         apply_style(
