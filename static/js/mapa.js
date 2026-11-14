@@ -209,7 +209,8 @@
             service: "WFS", version: "1.0.0", request: "GetFeature",
             typeName: cfg.layer, outputFormat: formato, viewparams: viewparams(),
         });
-        if (formato === "csv") params.set("propertyName", "geoobject_id,name,value");
+        // Sem a geometria; o id do geoobjeto sai na coluna FID (indicador.<id>)
+        if (formato === "csv") params.set("propertyName", "name,value");
         return cfg.wmsUrl.replace(/\/wms$/, "/ows") + "?" + params.toString();
     }
 
