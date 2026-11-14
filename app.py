@@ -5,7 +5,7 @@ app = Flask(__name__)
 CORS(app)
 
 # Layer padrão enquanto o indicador não tem uma layer própria no GeoServer
-LAYER_PADRAO = "adaptabrasil:BR_UF_2024"
+LAYER_PADRAO = "adaptabrasil:mapa_cinza"
 
 # Indicadores da home: título exibido na página e layer do GeoServer
 INDICADORES = {
@@ -21,8 +21,7 @@ INDICADORES = {
 
 @app.route('/')
 def homepage():
-    return render_template("home.html", map_layer=
-        "adaptabrasil:vw_indice_de_risco_de_impacto_do_estresse_hidrico")
+    return render_template("home.html", map_layer=LAYER_PADRAO)
 
 @app.route('/mapa')
 def mapa():
@@ -46,4 +45,4 @@ def basemapa():
     return render_template('basemapa.html', map_layer=LAYER_PADRAO)
 
 if __name__ == '__main__':
-    app.run()
+    app.run(host='0.0.0.0', port=5000, debug=False)

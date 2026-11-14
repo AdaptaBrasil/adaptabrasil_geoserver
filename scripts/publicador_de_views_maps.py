@@ -7,24 +7,27 @@ from requests.auth import HTTPBasicAuth
 # =====================================
 
 DB_CONFIG = {
-    "host": "localhost",
+    "host": "3.224.52.81",
     "database": "adaptabrasil",
-    "user": "adaptabrasil",
-    "password": "",
-    "port": "5432"
+    "user": "adaptabrasil_user",
+    "password": "142857",
+    "port": "6543",
+    "options": "-c search_path=adaptabrasil_aluana,public",
 }
+
+SCHEMA = "adaptabrasil_aluana"
 
 # =====================================
 # CONFIGURAÇÕES GEOSERVER
 # =====================================
 
-GEOSERVER_URL = "http://localhost:8080/geoserver"
+GEOSERVER_URL = "http://localhost:8081/geoserver"
 
 GEOSERVER_USER = "admin"
 GEOSERVER_PASSWORD = "geoserver"
 
 WORKSPACE = "adaptabrasil"
-DATASTORE = "AdaptaBrasil"
+DATASTORE = "adaptabrasil"
 
 # =====================================
 # MAPEAMENTO DE ESTILOS
@@ -200,11 +203,11 @@ with psycopg2.connect(**DB_CONFIG) as conn:
 
     with conn.cursor() as cur:
 
-        cur.execute("""
+        cur.execute(f"""
             SELECT
                 view_name,
                 type_geom
-            FROM views_adaptabrasil
+            FROM {SCHEMA}.views_adaptabrasil
             where published = FALSE
         """)
 
@@ -240,8 +243,8 @@ for layer_name, type_geom in layers:
             with conn.cursor() as cur:
                 tupla = (layer_name,)
 
-                cur.execute("""
-                            UPDATE views_adaptabrasil
+                cur.execute(f"""
+                            UPDATE {SCHEMA}.views_adaptabrasil
                             SET published = TRUE
                             WHERE view_name = %s;
                             """, tupla)

@@ -81,9 +81,9 @@
 
             function initMap(layerName) {
                 if (map) {
-                    // Atualiza o source do WMS da camada existente
+                    // Atualiza o mapa inicial para a nova layer selecionada
                     wmsLayer.setSource(new ol.source.ImageWMS({
-                        url: 'http://localhost:8080/geoserver/adaptabrasil/wms',
+                        url: 'http://3.224.52.81:8080/geoserver/adaptabrasil/wms',
                         params: {
                             'LAYERS': layerName,
                             'VERSION': '1.1.0',
@@ -93,10 +93,10 @@
                         crossOrigin: 'anonymous'
                     }));
                 } else {
-                    // Cria o mapa e adiciona a camada WMS
+                    // Caso o mapa ainda não exista, inicializa o mapa com uma camada WMS obtida do GeoServer
                     wmsLayer = new ol.layer.Image({
                         source: new ol.source.ImageWMS({
-                            url: 'http://localhost:8080/geoserver/adaptabrasil/wms',
+                            url: 'http://3.224.52.81:8080/geoserver/adaptabrasil/wms',
                             params: {
                                 'LAYERS': layerName,
                                 'VERSION': '1.1.0',
