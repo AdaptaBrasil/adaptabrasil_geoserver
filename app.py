@@ -1,3 +1,4 @@
+import os
 from collections import defaultdict
 from functools import lru_cache
 
@@ -182,4 +183,8 @@ def api_indicador(indicador_id):
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    # FLASK_DEBUG=1 liga o recarregamento automático e a página de erro detalhada.
+    # Em debug o app só escuta em localhost: o depurador do Werkzeug executa
+    # código Python e não pode ficar exposto na rede.
+    debug = os.getenv("FLASK_DEBUG", "0").lower() in ("1", "true")
+    app.run(host='127.0.0.1' if debug else '0.0.0.0', port=5000, debug=debug)
