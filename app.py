@@ -1,8 +1,17 @@
 from flask import Flask, render_template, request, abort
 from flask_cors import CORS
 
+from scripts import config
+
 app = Flask(__name__)
 CORS(app)
+
+# URL do WMS do GeoServer, disponível em todos os templates
+GEOSERVER_WMS_URL = config.geoserver_wms_url()
+
+@app.context_processor
+def geoserver():
+    return {"geoserver_wms_url": GEOSERVER_WMS_URL}
 
 # Layer padrão enquanto o indicador não tem uma layer própria no GeoServer
 LAYER_PADRAO = "adaptabrasil:mapa_cinza"

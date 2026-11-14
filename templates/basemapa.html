@@ -83,7 +83,7 @@
                 if (map) {
                     // Atualiza o mapa inicial para a nova layer selecionada
                     wmsLayer.setSource(new ol.source.ImageWMS({
-                        url: 'http://3.224.52.81:8080/geoserver/adaptabrasil/wms',
+                        url: {{ geoserver_wms_url | tojson }},
                         params: {
                             'LAYERS': layerName,
                             'VERSION': '1.1.0',
@@ -96,7 +96,7 @@
                     // Caso o mapa ainda não exista, inicializa o mapa com uma camada WMS obtida do GeoServer
                     wmsLayer = new ol.layer.Image({
                         source: new ol.source.ImageWMS({
-                            url: 'http://3.224.52.81:8080/geoserver/adaptabrasil/wms',
+                            url: {{ geoserver_wms_url | tojson }},
                             params: {
                                 'LAYERS': layerName,
                                 'VERSION': '1.1.0',

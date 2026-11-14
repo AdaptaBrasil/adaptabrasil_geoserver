@@ -56,3 +56,16 @@ def geoserver_config():
         "workspace": os.getenv("ADAPTABRASIL_GEOSERVER_WORKSPACE", "adaptabrasil"),
         "datastore": os.getenv("ADAPTABRASIL_GEOSERVER_DATASTORE", "adaptabrasil"),
     }
+
+
+def geoserver_wms_url():
+    """
+    URL do WMS que o navegador usa para buscar os mapas.
+
+    É a URL pública do GeoServer, diferente da ADAPTABRASIL_GEOSERVER_URL,
+    que o publicador usa de dentro do servidor (localhost). Não exige as
+    credenciais, porque o app Flask só precisa da URL.
+    """
+    url = _obrigatoria("ADAPTABRASIL_GEOSERVER_PUBLIC_URL").rstrip("/")
+    workspace = os.getenv("ADAPTABRASIL_GEOSERVER_WORKSPACE", "adaptabrasil")
+    return f"{url}/{workspace}/wms"
