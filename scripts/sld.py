@@ -11,6 +11,14 @@ from xml.sax.saxutils import escape
 # Visual igual ao dos estilos antigos (adaptabrasil_polygon, _line e _point)
 CONTORNO = "#232323"
 
+# Linha de divisa entre polígonos: bem fina e cinza claro
+DIVISA_COR = "#D9D9D9"
+DIVISA_LARGURA = "0.5"
+# A divisa só aparece de perto. Na visão do país, com milhares de polígonos
+# pequenos, as linhas viram uma mancha cinza. 1:10.000.000 fica entre o
+# zoom 5 (Brasil inteiro, ~1:17 mi) e o zoom 6 (um estado, ~1:8,7 mi).
+DIVISA_ESCALA_MAXIMA = 10_000_000
+
 
 def faixas(itens):
     """
@@ -92,14 +100,13 @@ def _filtro_dimensao(dimensao):
     )
 
 
-def _poligono_sem_divisa(cor):
+def _poligono(cor):
     """
-    Polígono sem linha de divisa entre vizinhos.
+    Polígono sem divisa: contorno de 1 px da cor do próprio preenchimento.
 
-    stroke-width 0 não tira a linha: o GeoServer desenha um traço de 1 pixel.
     Sem Stroke nenhum, o antialiasing deixa frestas claras entre polígonos
-    vizinhos. Um contorno da mesma cor do preenchimento cobre as frestas
-    sem desenhar divisa.
+    vizinhos; o contorno da mesma cor cobre as frestas sem desenhar divisa.
+    A divisa visível vem de _estilo_divisa, só quando o mapa está aproximado.
     """
     return (
         "<sld:PolygonSymbolizer>"
@@ -110,8 +117,25 @@ def _poligono_sem_divisa(cor):
     )
 
 
+def _estilo_divisa(filtrar_poligonos=True):
+    """
+    FeatureTypeStyle que desenha a divisa fina e clara por cima dos polígonos,
+    só abaixo de DIVISA_ESCALA_MAXIMA (mapa aproximado).
+    """
+    filtro = f"<ogc:Filter>{_filtro_dimensao(2)}</ogc:Filter>" if filtrar_poligonos else ""
+    return (
+        "<sld:FeatureTypeStyle><sld:Rule><sld:Name>divisa</sld:Name>"
+        f"{filtro}"
+        f"<sld:MaxScaleDenominator>{DIVISA_ESCALA_MAXIMA}</sld:MaxScaleDenominator>"
+        "<sld:LineSymbolizer><sld:Stroke>"
+        f'<sld:CssParameter name="stroke">{DIVISA_COR}</sld:CssParameter>'
+        f'<sld:CssParameter name="stroke-width">{DIVISA_LARGURA}</sld:CssParameter>'
+        "</sld:Stroke></sld:LineSymbolizer></sld:Rule></sld:FeatureTypeStyle>"
+    )
+
+
 def gerar_sld_fundo(nome_estilo, cor="#AAAAAA"):
-    """Estilo da layer de fundo: municípios cinza, sem linhas de divisa."""
+    """Estilo da layer de fundo: municípios cinza, com divisa só de perto."""
     nome = escape(nome_estilo)
     return (
         '<?xml version="1.0" encoding="UTF-8"?>'
@@ -119,14 +143,16 @@ def gerar_sld_fundo(nome_estilo, cor="#AAAAAA"):
         'xmlns:ogc="http://www.opengis.net/ogc" xmlns:gml="http://www.opengis.net/gml" version="1.0.0">'
         f"<sld:NamedLayer><sld:Name>{nome}</sld:Name><sld:UserStyle>"
         f"<sld:Name>{nome}</sld:Name><sld:FeatureTypeStyle><sld:Rule>"
-        f"{_poligono_sem_divisa(cor)}"
-        "</sld:Rule></sld:FeatureTypeStyle></sld:UserStyle></sld:NamedLayer></sld:StyledLayerDescriptor>"
+        f"{_poligono(cor)}"
+        "</sld:Rule></sld:FeatureTypeStyle>"
+        f"{_estilo_divisa(filtrar_poligonos=False)}"
+        "</sld:UserStyle></sld:NamedLayer></sld:StyledLayerDescriptor>"
     )
 
 
 def _simbolo(dimensao, cor):
     if dimensao == 2:
-        return _poligono_sem_divisa(cor)
+        return _poligono(cor)
     if dimensao == 1:
         return (
             "<sld:LineSymbolizer><sld:Stroke>"
@@ -145,21 +171,28 @@ def _simbolo(dimensao, cor):
 
 
 def gerar_sld(nome_estilo, itens):
-    """SLD 1.0 completo para uma legenda."""
-    regras = []
-    # Polígonos primeiro, para que linhas e pontos fiquem por cima
-    for dimensao in (2, 1, 0):
-        for faixa in faixas(itens):
-            titulo = escape(faixa["label"])
-            regras.append(
-                "<sld:Rule>"
-                f"<sld:Name>{titulo}</sld:Name><sld:Title>{titulo}</sld:Title>"
-                "<ogc:Filter><ogc:And>"
-                f"{_filtro_dimensao(dimensao)}{_filtro_valor(faixa['filtro'])}"
-                "</ogc:And></ogc:Filter>"
-                f"{_simbolo(dimensao, escape(faixa['color']))}"
-                "</sld:Rule>"
-            )
+    """
+    SLD 1.0 completo para uma legenda.
+
+    Três FeatureTypeStyle, desenhados nessa ordem: o preenchimento dos
+    polígonos, a divisa entre eles (só de perto) e, por cima de tudo, as
+    linhas (estradas, ferrovias) e os pontos (portos).
+    """
+    def regras(dimensoes):
+        resultado = []
+        for dimensao in dimensoes:
+            for faixa in faixas(itens):
+                titulo = escape(faixa["label"])
+                resultado.append(
+                    "<sld:Rule>"
+                    f"<sld:Name>{titulo}</sld:Name><sld:Title>{titulo}</sld:Title>"
+                    "<ogc:Filter><ogc:And>"
+                    f"{_filtro_dimensao(dimensao)}{_filtro_valor(faixa['filtro'])}"
+                    "</ogc:And></ogc:Filter>"
+                    f"{_simbolo(dimensao, escape(faixa['color']))}"
+                    "</sld:Rule>"
+                )
+        return "".join(resultado)
 
     nome = escape(nome_estilo)
     return (
@@ -167,7 +200,9 @@ def gerar_sld(nome_estilo, itens):
         '<sld:StyledLayerDescriptor xmlns:sld="http://www.opengis.net/sld" '
         'xmlns:ogc="http://www.opengis.net/ogc" xmlns:gml="http://www.opengis.net/gml" version="1.0.0">'
         f"<sld:NamedLayer><sld:Name>{nome}</sld:Name><sld:UserStyle>"
-        f"<sld:Name>{nome}</sld:Name><sld:FeatureTypeStyle>"
-        + "".join(regras)
-        + "</sld:FeatureTypeStyle></sld:UserStyle></sld:NamedLayer></sld:StyledLayerDescriptor>"
+        f"<sld:Name>{nome}</sld:Name>"
+        f"<sld:FeatureTypeStyle>{regras((2,))}</sld:FeatureTypeStyle>"
+        f"{_estilo_divisa()}"
+        f"<sld:FeatureTypeStyle>{regras((1, 0))}</sld:FeatureTypeStyle>"
+        "</sld:UserStyle></sld:NamedLayer></sld:StyledLayerDescriptor>"
     )
