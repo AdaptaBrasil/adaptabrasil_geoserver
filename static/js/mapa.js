@@ -18,6 +18,9 @@
         ano: null,
         cenario: null,
         botaoAtivo: null,
+        pedido: 0,         // conta as seleções, para descartar respostas antigas
+        estado: 0,         // id na view state; 0 = Brasil
+        municipio: 0,      // id na view county; 0 = todos os municípios do estado
     };
 
     // ---------- Mapa ----------
@@ -39,23 +42,205 @@
         }),
     });
 
+    const VISTA_BRASIL = { center: ol.proj.fromLonLat([-52.5, -16]), zoom: 4.75 };
+
     const map = new ol.Map({
         target: "map",
         layers: [camadaFundo, camadaIndicador],
-        view: new ol.View({ center: ol.proj.fromLonLat([-52.5, -16]), zoom: 4.75 }),
+        view: new ol.View({ ...VISTA_BRASIL }),
+    });
+
+    // ---------- Rodapé: andamento e tempo de carregamento ----------
+
+    /*
+     * O GeoServer devolve a imagem de uma vez, sem informar o andamento.
+     * A barra marca as etapas (consulta do indicador, pedido da imagem) e,
+     * enquanto o GeoServer gera a imagem, avança devagar em direção a 95%;
+     * fecha em 100% quando a imagem chega. O tempo vai do clique até a
+     * imagem aparecer no mapa.
+     */
+    const progresso = (function () {
+        const caixa = document.querySelector("#rodape .progress");
+        const barra = document.getElementById("rodape-barra");
+        const texto = document.getElementById("rodape-texto");
+        let inicio = null;
+        let rotulo = "";
+        let valor = 0;
+        let timer = null;
+
+        function definir(v) {
+            valor = v;
+            barra.style.width = `${v}%`;
+            caixa.setAttribute("aria-valuenow", Math.round(v));
+        }
+
+        function parar() {
+            clearInterval(timer);
+            timer = null;
+            barra.classList.remove("progress-bar-striped", "progress-bar-animated");
+        }
+
+        return {
+            ativo: () => inicio !== null,
+
+            iniciar(nome) {
+                parar();
+                inicio = performance.now();
+                rotulo = nome;
+                caixa.hidden = false;
+                barra.classList.remove("bg-danger");
+                barra.classList.add("bg-success", "progress-bar-striped", "progress-bar-animated");
+                definir(5);
+                texto.textContent = `Carregando ${nome}…`;
+            },
+
+            avancar(v) {
+                if (inicio !== null && v > valor) definir(v);
+            },
+
+            aguardarImagem() {
+                if (inicio === null) return;
+                clearInterval(timer);
+                timer = setInterval(() => this.avancar(valor + (95 - valor) * 0.06), 200);
+            },
+
+            concluir() {
+                if (inicio === null) return;
+                const segundos = (performance.now() - inicio) / 1000;
+                parar();
+                definir(100);
+                inicio = null;
+                const s = segundos.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+                texto.textContent = `${rotulo}: mapa carregado em ${s} s`;
+            },
+
+            falhar(mensagem) {
+                parar();
+                barra.classList.replace("bg-success", "bg-danger");
+                definir(100);
+                inicio = null;
+                texto.textContent = `${rotulo}: ${mensagem}`;
+            },
+
+            encerrar(mensagem) {
+                parar();
+                caixa.hidden = true;
+                definir(0);
+                inicio = null;
+                texto.textContent = mensagem;
+            },
+        };
+    })();
+
+    function rotuloAtual() {
+        const cenario = document.getElementById("cenario");
+        const nomeCenario = cenario.options[cenario.selectedIndex]?.text;
+        const nome = estado.indicador.titulo || estado.indicador.nome;
+        return `${nome} (${estado.ano}${nomeCenario ? ", " + nomeCenario : ""}) · ${nomeArea()}`;
+    }
+
+    // Só a última imagem pedida conta: uma resposta atrasada de um pedido
+    // anterior não pode encerrar a contagem do mapa atual.
+    let ultimaImagem = null;
+
+    fonteIndicador.on("imageloadstart", e => {
+        ultimaImagem = e.image;
+        // Mover ou aproximar o mapa também gera uma imagem nova
+        if (!progresso.ativo()) progresso.iniciar(rotuloAtual());
+        progresso.avancar(35);
+        progresso.aguardarImagem();
+    });
+    fonteIndicador.on("imageloadend", e => {
+        if (e.image === ultimaImagem) progresso.concluir();
+    });
+    fonteIndicador.on("imageloaderror", e => {
+        if (e.image === ultimaImagem) progresso.falhar("falha ao carregar o mapa");
     });
 
     function viewparams() {
-        return `indicador:${estado.indicador.id};ano:${estado.ano};cenario:${estado.cenario}`;
+        return `indicador:${estado.indicador.id};ano:${estado.ano};cenario:${estado.cenario}`
+            + `;estado:${estado.estado};municipio:${estado.municipio}`;
     }
 
+    // ---------- Filtros de Estado e Município ----------
+
+    const selectEstado = document.getElementById("estado");
+    const selectMunicipio = document.getElementById("municipio");
+
+    function nomeArea() {
+        if (estado.municipio) {
+            const sigla = selectEstado.selectedOptions[0].dataset.sigla;
+            return `${selectMunicipio.selectedOptions[0].text} (${sigla})`;
+        }
+        return selectEstado.selectedOptions[0].text;
+    }
+
+    async function carregarEstados() {
+        const estados = await (await fetch("/api/estados")).json();
+        selectEstado.append(...estados.map(e => {
+            const opcao = new Option(e.nome, e.id);
+            opcao.dataset.sigla = e.sigla;
+            return opcao;
+        }));
+    }
+
+    async function carregarMunicipios() {
+        selectMunicipio.replaceChildren(new Option("Todos", 0, true, true));
+        selectMunicipio.disabled = true;
+        if (!estado.estado) return;
+        const pedido = estado.estado;
+        const municipios = await (await fetch(`/api/estados/${pedido}/municipios`)).json();
+        // Outro estado foi escolhido enquanto este carregava
+        if (pedido !== estado.estado) return;
+        selectMunicipio.append(...municipios.map(m => new Option(m.nome, m.id)));
+        selectMunicipio.disabled = false;
+    }
+
+    async function enquadrarArea() {
+        const view = map.getView();
+        if (!estado.estado) {
+            view.animate({ ...VISTA_BRASIL, duration: 400 });
+            return;
+        }
+        const area = `${estado.estado}/${estado.municipio}`;
+        const params = new URLSearchParams({ estado: estado.estado, municipio: estado.municipio });
+        const resposta = await fetch(`/api/limites?${params}`);
+        // A área mudou enquanto os limites carregavam
+        if (!resposta.ok || area !== `${estado.estado}/${estado.municipio}`) return;
+        const extent = ol.proj.transformExtent(await resposta.json(), "EPSG:4326", "EPSG:3857");
+        view.fit(extent, { padding: [30, 30, 30, 30], duration: 400, maxZoom: 12 });
+    }
+
+    function aplicarArea() {
+        enquadrarArea().catch(e => console.error("Falha ao enquadrar a área", e));
+        // Sem indicador escolhido, o filtro vale quando ele for escolhido
+        if (!estado.indicador || !estado.indicador.opcoes.length) return;
+        progresso.iniciar(rotuloAtual());
+        atualizarMapa();
+    }
+
+    selectEstado.addEventListener("change", () => {
+        estado.estado = Number(selectEstado.value);
+        estado.municipio = 0;
+        carregarMunicipios().catch(e => console.error("Falha ao carregar os municípios", e));
+        aplicarArea();
+    });
+
+    selectMunicipio.addEventListener("change", () => {
+        estado.municipio = Number(selectMunicipio.value);
+        aplicarArea();
+    });
+
     function atualizarMapa() {
-        fonteIndicador.updateParams({
-            VIEWPARAMS: viewparams(),
-            STYLES: cfg.prefixoEstilo + estado.indicador.legenda,
-        });
+        const params = { VIEWPARAMS: viewparams(), STYLES: cfg.prefixoEstilo + estado.indicador.legenda };
+        const atuais = fonteIndicador.getParams();
+        // Mesmo mapa já na tela: o OpenLayers não pede imagem nova
+        const igual = camadaIndicador.getVisible()
+            && atuais.VIEWPARAMS === params.VIEWPARAMS && atuais.STYLES === params.STYLES;
+        fonteIndicador.updateParams(params);
         camadaIndicador.setVisible(true);
         atualizarDownloads();
+        if (igual) progresso.concluir();
     }
 
     // ---------- Árvore de indicadores ----------
@@ -108,8 +293,23 @@
         estado.botaoAtivo = botao;
         botao.classList.add("ativo");
 
-        const resposta = await fetch(`/api/indicadores/${id}`);
-        const dados = await resposta.json();
+        const pedido = ++estado.pedido;
+        progresso.iniciar(botao.textContent);
+        progresso.avancar(15);
+
+        let dados;
+        try {
+            const resposta = await fetch(`/api/indicadores/${id}`);
+            if (!resposta.ok) throw new Error(`HTTP ${resposta.status}`);
+            dados = await resposta.json();
+        } catch (e) {
+            console.error("Falha ao consultar o indicador", e);
+            if (pedido === estado.pedido) progresso.falhar("falha ao consultar o indicador");
+            return;
+        }
+        // Outro indicador foi escolhido enquanto este carregava
+        if (pedido !== estado.pedido) return;
+        progresso.avancar(30);
         estado.indicador = dados;
 
         document.getElementById("indicador-nome").textContent = dados.titulo || dados.nome;
@@ -120,6 +320,7 @@
             document.getElementById("sem-dados").hidden = false;
             document.getElementById("controles").hidden = true;
             camadaIndicador.setVisible(false);
+            progresso.encerrar(`${dados.titulo || dados.nome}: sem dados para exibir no mapa`);
             return;
         }
         document.getElementById("sem-dados").hidden = true;
@@ -154,11 +355,13 @@
     document.getElementById("ano").addEventListener("change", e => {
         estado.ano = Number(e.target.value);
         preencherCenarios();
+        progresso.iniciar(rotuloAtual());
         atualizarMapa();
     });
 
     document.getElementById("cenario").addEventListener("change", e => {
         estado.cenario = Number(e.target.value);
+        progresso.iniciar(rotuloAtual());
         atualizarMapa();
     });
 
@@ -220,4 +423,5 @@
     }
 
     carregarArvore().catch(e => console.error("Falha ao carregar a árvore de indicadores", e));
+    carregarEstados().catch(e => console.error("Falha ao carregar os estados", e));
 })();

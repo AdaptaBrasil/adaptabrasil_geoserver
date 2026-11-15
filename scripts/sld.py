@@ -92,15 +92,41 @@ def _filtro_dimensao(dimensao):
     )
 
 
+def _poligono_sem_divisa(cor):
+    """
+    Polígono sem linha de divisa entre vizinhos.
+
+    stroke-width 0 não tira a linha: o GeoServer desenha um traço de 1 pixel.
+    Sem Stroke nenhum, o antialiasing deixa frestas claras entre polígonos
+    vizinhos. Um contorno da mesma cor do preenchimento cobre as frestas
+    sem desenhar divisa.
+    """
+    return (
+        "<sld:PolygonSymbolizer>"
+        f'<sld:Fill><sld:CssParameter name="fill">{cor}</sld:CssParameter></sld:Fill>'
+        f'<sld:Stroke><sld:CssParameter name="stroke">{cor}</sld:CssParameter>'
+        '<sld:CssParameter name="stroke-width">1</sld:CssParameter></sld:Stroke>'
+        "</sld:PolygonSymbolizer>"
+    )
+
+
+def gerar_sld_fundo(nome_estilo, cor="#AAAAAA"):
+    """Estilo da layer de fundo: municípios cinza, sem linhas de divisa."""
+    nome = escape(nome_estilo)
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<sld:StyledLayerDescriptor xmlns:sld="http://www.opengis.net/sld" '
+        'xmlns:ogc="http://www.opengis.net/ogc" xmlns:gml="http://www.opengis.net/gml" version="1.0.0">'
+        f"<sld:NamedLayer><sld:Name>{nome}</sld:Name><sld:UserStyle>"
+        f"<sld:Name>{nome}</sld:Name><sld:FeatureTypeStyle><sld:Rule>"
+        f"{_poligono_sem_divisa(cor)}"
+        "</sld:Rule></sld:FeatureTypeStyle></sld:UserStyle></sld:NamedLayer></sld:StyledLayerDescriptor>"
+    )
+
+
 def _simbolo(dimensao, cor):
     if dimensao == 2:
-        return (
-            "<sld:PolygonSymbolizer>"
-            f'<sld:Fill><sld:CssParameter name="fill">{cor}</sld:CssParameter></sld:Fill>'
-            f'<sld:Stroke><sld:CssParameter name="stroke">{CONTORNO}</sld:CssParameter>'
-            '<sld:CssParameter name="stroke-width">0</sld:CssParameter></sld:Stroke>'
-            "</sld:PolygonSymbolizer>"
-        )
+        return _poligono_sem_divisa(cor)
     if dimensao == 1:
         return (
             "<sld:LineSymbolizer><sld:Stroke>"

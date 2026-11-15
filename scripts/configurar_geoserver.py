@@ -10,7 +10,10 @@ indicador, cenário e ano, o GeoServer passa a ter:
   - um estilo por legenda da tabela legend_items
     (config.GEOSERVER_PREFIXO_ESTILO + id), escolhido com STYLES=;
   - a layer de fundo (config.GEOSERVER_LAYER_FUNDO), também uma SQL view,
-    com os municípios da tabela geoobject e o estilo cinza que já existe.
+    com os municípios da tabela geoobject, e o seu estilo cinza
+    (config.GEOSERVER_ESTILO_FUNDO).
+
+Os polígonos não têm linha de divisa (ver sld._poligono_sem_divisa).
 
 Cenário 0 significa "sem cenário" (scenario_id nulo, o dado do presente).
 
@@ -53,8 +56,23 @@ PARAMETROS = [
     ("indicador", "2", r"^\d+$"),
     ("ano", "2020", r"^\d+$"),
     ("cenario", "0", r"^\d+$"),
+    ("estado", "0", r"^\d+$"),
+    ("municipio", "0", r"^\d+$"),
 ]
 
+# Filtros de área (0 = todos), com os ids das views state e county:
+#   - estado: municípios e setores censitários têm state_id; portos, rodovias
+#     e ferrovias têm só a sigla na coluna state (o state_id dos portos usa
+#     outra numeração);
+#   - municipio: municípios (county_id = o próprio id) e setores têm county_id;
+#     portos, rodovias e ferrovias (geoobjecttype 6, 7 e 8) são filtrados pela
+#     geometria do município, e só quando o indicador é de um desses tipos.
+#     Pontos aceitam até 0,05 grau (~5 km), porque há portos no mar, fora do
+#     polígono (Ilhéus). O filtro vira uma lista de ids calculada uma vez, com
+#     um pré-filtro pelo retângulo do município (&&): escrito como OR na linha,
+#     o Postgres testava a geometria de ~10 mil objetos e acionava o JIT,
+#     levando de 0,7 a 3 s em vez de ~0,15 s.
+#
 # %cenario% = 0 seleciona o dado sem cenário. Depois da substituição os
 # termos viram constantes e o Postgres usa o índice value_unique nos dois casos.
 SQL_VIEW = f"""SELECT
@@ -66,7 +84,19 @@ FROM {SCHEMA}.value v
 JOIN {SCHEMA}.geoobject g ON g.id = v.geoobject_id
 WHERE v.indicator_id = %indicador%
   AND v.year = %ano%
-  AND (v.scenario_id = %cenario% OR (%cenario% = 0 AND v.scenario_id IS NULL))"""
+  AND (v.scenario_id = %cenario% OR (%cenario% = 0 AND v.scenario_id IS NULL))
+  AND (%estado% = 0 OR g.state_id = %estado%
+       OR g.state = (SELECT s.state FROM {SCHEMA}.state s WHERE s.id = %estado%))
+  AND (%municipio% = 0 OR v.geoobject_id IN (
+        SELECT o.id FROM {SCHEMA}.geoobject o WHERE o.county_id = %municipio%
+        UNION ALL
+        SELECT o.id FROM {SCHEMA}.county c
+        JOIN {SCHEMA}.geoobject o
+          ON o.geoobjecttype_id IN (6, 7, 8) AND o.geom && ST_Expand(c.geom, 0.05)
+        WHERE c.id = %municipio%
+          AND EXISTS (SELECT 1 FROM {SCHEMA}.indicator i
+                      WHERE i.id = %indicador% AND i.geoobjecttype_id IN (6, 7, 8))
+          AND ST_DWithin(c.geom, o.geom, CASE WHEN o.geoobjecttype_id = 6 THEN 0.05 ELSE 0 END)))"""
 
 # Fundo: os municípios (geoobjecttype_id = 1), sem parâmetros
 SQL_FUNDO = f"""SELECT g.id, g.name, g.geom
@@ -120,7 +150,8 @@ def featuretype_xml(nome, titulo, resumo, sql, chave, parametros=()):
 def featuretype_indicador():
     return featuretype_xml(
         LAYER, "Indicadores AdaptaBrasil",
-        "Valor de um indicador por geoobjeto. Parâmetros: indicador, ano e cenario (0 = sem cenário).",
+        "Valor de um indicador por geoobjeto. Parâmetros: indicador, ano, cenario (0 = sem cenário), "
+        "estado e municipio (0 = todos).",
         SQL_VIEW, "geoobject_id", PARAMETROS,
     )
 
@@ -244,19 +275,20 @@ def main():
 
     estilos = {f"{config.GEOSERVER_PREFIXO_ESTILO}{lid}": sld.gerar_sld(f"{config.GEOSERVER_PREFIXO_ESTILO}{lid}", itens)
                for lid, itens in legendas.items()}
+    estilo_fundo = sld.gerar_sld_fundo(config.GEOSERVER_ESTILO_FUNDO)
 
     if args.simular:
         PASTA_SIMULACAO.mkdir(exist_ok=True)
         for nome, conteudo in estilos.items():
             (PASTA_SIMULACAO / f"{nome}.sld").write_text(conteudo, encoding="utf-8")
+        (PASTA_SIMULACAO / f"{config.GEOSERVER_ESTILO_FUNDO}.sld").write_text(estilo_fundo, encoding="utf-8")
         (PASTA_SIMULACAO / f"{LAYER}_featuretype.xml").write_text(featuretype_indicador(), encoding="utf-8")
         (PASTA_SIMULACAO / f"{LAYER_FUNDO}_featuretype.xml").write_text(featuretype_fundo(), encoding="utf-8")
         print(f"{len(estilos)} estilos e as layers {LAYER} e {LAYER_FUNDO} gravados em {PASTA_SIMULACAO}")
         return
 
     print(f"GeoServer: {REST} (workspace {WORKSPACE}, datastore {DATASTORE})")
-    if not _existe(f"workspaces/{WORKSPACE}/styles/{config.GEOSERVER_ESTILO_FUNDO}.json"):
-        sys.exit(f"O estilo {config.GEOSERVER_ESTILO_FUNDO} da layer de fundo não existe no GeoServer.")
+    salvar_estilo(config.GEOSERVER_ESTILO_FUNDO, estilo_fundo)
     for nome, conteudo in estilos.items():
         salvar_estilo(nome, conteudo)
     salvar_layers(list(estilos))

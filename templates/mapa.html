@@ -19,6 +19,17 @@
   #legenda { list-style: none; padding-left: 0; margin: 0; }
   #legenda li { display: flex; align-items: center; gap: .5rem; margin-bottom: .2rem; font-size: .9rem; }
   #legenda .cor { width: 1.2rem; height: 1.2rem; border: 1px solid #999; flex: none; }
+  /* Rodapé com o andamento do carregamento do mapa (static/js/mapa.js) */
+  :root { --rodape-altura: 32px; }
+  #map { bottom: var(--rodape-altura); }
+  #rodape {
+    position: fixed; left: 0; right: 0; bottom: 0; height: var(--rodape-altura); z-index: 20;
+    display: flex; align-items: center; gap: .75rem; padding: 0 1rem;
+    background: #f8f9fa; border-top: 1px solid #dee2e6; font-size: .85rem; color: #495057;
+  }
+  #rodape .progress { width: 160px; height: 8px; flex: none; }
+  #rodape .progress-bar { transition: width .2s linear; }
+  #rodape-texto { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #info {
     position: fixed; right: 1rem; top: 130px; z-index: 10; background: #fff;
     padding: .5rem .75rem; border-radius: .25rem; box-shadow: 0 1px 4px rgba(0,0,0,.3); max-width: 260px;
@@ -27,12 +38,28 @@
 {% endblock %}
 
 {% block content %}
-<div class="d-flex" style="height: calc(100vh - 70px);">
+<div class="d-flex" style="height: calc(100vh - 70px - var(--rodape-altura));">
 
   <!-- Barra lateral -->
-  <div class="bg-light p-3 border-end" style="width: 400px; height: calc(100vh - 70px); overflow-y: auto;">
+  <div class="bg-light p-3 border-end" style="width: 400px; height: calc(100vh - 70px - var(--rodape-altura)); overflow-y: auto;">
     <!-- Título do indicador escolhido na home -->
     <h3 style="margin-top: 3rem; margin-bottom: 1.5rem; font-weight: 500;">{{ titulo }}</h3>
+
+    <!-- Filtros de área: listas das views state e county (static/js/mapa.js) -->
+    <div class="row g-2 mb-4">
+      <div class="col">
+        <label for="estado" class="form-label small mb-1">Estado</label>
+        <select id="estado" class="form-select form-select-sm">
+          <option value="0" selected>Brasil</option>
+        </select>
+      </div>
+      <div class="col">
+        <label for="municipio" class="form-label small mb-1">Município</label>
+        <select id="municipio" class="form-select form-select-sm" disabled>
+          <option value="0" selected>Todos</option>
+        </select>
+      </div>
+    </div>
 
     <!-- Árvore montada a partir de indicator_indicator (static/js/mapa.js) -->
     <ul id="arvore"></ul>
@@ -69,6 +96,14 @@
 
 <div id="map"></div>
 <div id="info" hidden></div>
+
+<footer id="rodape">
+  <div class="progress" role="progressbar" aria-label="Carregamento do mapa"
+       aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
+    <div id="rodape-barra" class="progress-bar bg-success" style="width: 0%"></div>
+  </div>
+  <span id="rodape-texto">Escolha um indicador na barra lateral.</span>
+</footer>
 {% endblock %}
 
 {% block custom_js %}
