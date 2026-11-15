@@ -255,6 +255,32 @@ def buscar_limites(estado_id, municipio_id):
     return None if limites[0] is None else list(limites)
 
 
+@lru_cache(maxsize=4096)
+def buscar_rotulo_geoobjeto(geoobjeto_id):
+    """
+    Rótulos do popup do hover. A sigla do estado vai na linha da cidade: num
+    município, o próprio nome ("Igaratá/SP"); num setor censitário, o
+    município a que ele pertence ("Alexandria/RN"), com o código do setor no
+    título. O GeoServer só devolve nome e valor.
+    """
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(f"""
+            SELECT CASE WHEN c.id IS NOT NULL AND c.id <> g.id THEN g.name::text
+                        WHEN g.state IS NULL THEN g.name::text
+                        ELSE concat(g.name, '/', g.state) END,
+                   CASE WHEN c.id IS NULL OR c.id = g.id THEN NULL
+                        WHEN c.state IS NULL THEN c.name::text
+                        ELSE concat(c.name, '/', c.state) END
+            FROM {SCHEMA}.geoobject g
+            LEFT JOIN {SCHEMA}.geoobject c ON c.id = g.county_id
+            WHERE g.id = %s
+        """, (geoobjeto_id,))
+        linha = cur.fetchone()
+    if linha is None:
+        return None
+    return {"nome": linha[0], "municipio": linha[1]}
+
+
 def buscar_opcoes(indicador_id):
     """Combinações de ano e cenário que têm dados para o indicador."""
     with conectar() as conn, conn.cursor() as cur:
@@ -335,6 +361,13 @@ def api_limites():
     if limites is None:
         abort(404)
     return jsonify(limites)
+
+@app.route('/api/geoobjetos/<int:geoobjeto_id>')
+def api_geoobjeto(geoobjeto_id):
+    rotulo = buscar_rotulo_geoobjeto(geoobjeto_id)
+    if rotulo is None:
+        abort(404)
+    return jsonify(rotulo)
 
 @app.route('/api/indicadores/<int:indicador_id>')
 def api_indicador(indicador_id):
