@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 import threading
 import unicodedata
 from collections import defaultdict
@@ -353,4 +354,9 @@ if __name__ == '__main__':
     # Em debug o app só escuta em localhost: o depurador do Werkzeug executa
     # código Python e não pode ficar exposto na rede.
     debug = os.getenv("FLASK_DEBUG", "0").lower() in ("1", "true")
-    app.run(host='127.0.0.1' if debug else '0.0.0.0', port=5000, debug=debug)
+    # Sob o depurador do PyCharm (pydevd) o recarregamento fica desligado: para
+    # reiniciar, o Werkzeug encerra o processo com sys.exit(3), e o depurador
+    # para nesse SystemExit como se fosse um erro.
+    sob_depurador = "pydevd" in sys.modules
+    app.run(host='127.0.0.1' if debug else '0.0.0.0', port=5000, debug=debug,
+            use_reloader=debug and not sob_depurador)
