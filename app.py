@@ -315,7 +315,6 @@ def mapa():
     mapa_config = {
         "wmsUrl": GEOSERVER_WMS_URL,
         "layer": f"{config.geoserver_workspace()}:{config.GEOSERVER_LAYER}",
-        "layerFundo": LAYER_PADRAO,
         "prefixoEstilo": config.GEOSERVER_PREFIXO_ESTILO,
         "raiz": dados["raiz"],
     }

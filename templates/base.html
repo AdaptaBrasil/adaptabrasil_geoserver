@@ -91,47 +91,50 @@
             let map;
             let wmsLayer;
 
-            function initMap(layerName) {
-                if (map) {
-                    // Atualiza o source do WMS da camada existente
-                    wmsLayer.setSource(new ol.source.ImageWMS({
-                        url: {{ geoserver_wms_url | tojson }},
-                        params: {
-                            'LAYERS': layerName,
-                            'VERSION': '1.1.0',
-                            'FORMAT': 'image/png'
-                        },
-                        serverType: 'geoserver',
-                        crossOrigin: 'anonymous'
-                    }));
-                } else {
-                    // Cria o mapa e adiciona a camada WMS
-                    wmsLayer = new ol.layer.Image({
-                        source: new ol.source.ImageWMS({
-                            url: {{ geoserver_wms_url | tojson }},
-                            params: {
-                                'LAYERS': layerName,
-                                'VERSION': '1.1.0',
-                                'FORMAT': 'image/png'
-                            },
-                            serverType: 'geoserver',
+            // Fundo: imagem de satélite da Esri (World Imagery), a mesma do mapa
+            // dos indicadores (static/js/mapa.js)
+            function criarMapa() {
+                map = new ol.Map({
+                    target: 'map',
+                    layers: [new ol.layer.Tile({
+                        source: new ol.source.XYZ({
+                            url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                            attributions: 'Esri, Maxar, Earthstar Geographics',
+                            maxZoom: 19,
                             crossOrigin: 'anonymous'
                         })
-                    });
+                    })],
+                    view: new ol.View({ center: ol.proj.fromLonLat([-53, -14]), zoom: 4 })
+                });
+                // Brasil inteiro enquadrado, seja qual for a proporção da tela
+                map.getView().fit(
+                    ol.proj.transformExtent([-74.0, -33.8, -32.3, 5.3], 'EPSG:4326', 'EPSG:3857'),
+                    { padding: [20, 20, 20, 20] });
+            }
 
-                    map = new ol.Map({
-                        target: 'map',
-                        layers: [wmsLayer],
-                        view: new ol.View({
-                            center: ol.proj.fromLonLat([-52.5, -16]),
-                            zoom: 4.75
-                        })
-                    });
+            // Põe (ou troca) uma layer WMS por cima do satélite (teste.html)
+            function initMap(layerName) {
+                if (!map) criarMapa();
+                const source = new ol.source.ImageWMS({
+                    url: {{ geoserver_wms_url | tojson }},
+                    params: {
+                        'LAYERS': layerName,
+                        'VERSION': '1.1.0',
+                        'FORMAT': 'image/png'
+                    },
+                    serverType: 'geoserver',
+                    crossOrigin: 'anonymous'
+                });
+                if (wmsLayer) {
+                    wmsLayer.setSource(source);
+                } else {
+                    wmsLayer = new ol.layer.Image({ source: source });
+                    map.addLayer(wmsLayer);
                 }
             }
 
             document.addEventListener("DOMContentLoaded", function() {
-                initMap('{{ map_layer }}');
+                if (!map) criarMapa();
             });
         </script>
     {% endif %}

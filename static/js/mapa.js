@@ -31,24 +31,34 @@
         serverType: "geoserver",
         crossOrigin: "anonymous",
     });
-    const camadaIndicador = new ol.layer.Image({ source: fonteIndicador, visible: false });
+    // Um pouco transparente, para o satélite aparecer por baixo (como no webtests)
+    const OPACIDADE_INDICADOR = 0.78;
+    const camadaIndicador = new ol.layer.Image({
+        source: fonteIndicador, visible: false, opacity: OPACIDADE_INDICADOR,
+    });
 
-    const camadaFundo = new ol.layer.Image({
-        source: new ol.source.ImageWMS({
-            url: cfg.wmsUrl,
-            params: { LAYERS: cfg.layerFundo, VERSION: "1.1.1", FORMAT: "image/png" },
-            serverType: "geoserver",
+    // Fundo: imagem de satélite da Esri (World Imagery), a mesma do webtests
+    const camadaFundo = new ol.layer.Tile({
+        source: new ol.source.XYZ({
+            url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            attributions: "Esri, Maxar, Earthstar Geographics",
+            maxZoom: 19,
             crossOrigin: "anonymous",
         }),
     });
 
-    const VISTA_BRASIL = { center: ol.proj.fromLonLat([-52.5, -16]), zoom: 4.75 };
+    // Vista inicial: o Brasil inteiro enquadrado no espaço do mapa, seja qual
+    // for o tamanho e a proporção da tela (um zoom fixo cortava o país em telas
+    // largas e baixas). Retângulo do continente até Fernando de Noronha.
+    const EXTENSAO_BRASIL = ol.proj.transformExtent([-74.0, -33.8, -32.3, 5.3], "EPSG:4326", "EPSG:3857");
+    const MARGEM_BRASIL = [20, 20, 20, 20];
 
     const map = new ol.Map({
         target: "map",
         layers: [camadaFundo, camadaIndicador],
-        view: new ol.View({ ...VISTA_BRASIL }),
+        view: new ol.View({ center: ol.extent.getCenter(EXTENSAO_BRASIL), zoom: 4 }),
     });
+    map.getView().fit(EXTENSAO_BRASIL, { padding: MARGEM_BRASIL });
 
     // ---------- Rodapé: andamento e tempo de carregamento ----------
 
@@ -199,7 +209,7 @@
     async function enquadrarArea() {
         const view = map.getView();
         if (!estado.estado) {
-            view.animate({ ...VISTA_BRASIL, duration: 400 });
+            view.fit(EXTENSAO_BRASIL, { padding: MARGEM_BRASIL, duration: 400 });
             return;
         }
         const area = `${estado.estado}/${estado.municipio}`;
