@@ -1,0 +1,14 @@
+# Deploy do app no servidor:
+#   1. copie o .env.example para .env e preencha as senhas;
+#   2. docker compose up -d --build
+# Atualizar depois de um git pull: docker compose up -d --build
+# Logs: docker compose logs -f app
+services:
+  app:
+    build: .
+    image: adaptabrasil-geoserver-app
+    ports:
+      - "${APP_PORTA:-5000}:8000"    # HOST:CONTÊINER
+    env_file:
+      - .env
+    restart: unless-stopped
