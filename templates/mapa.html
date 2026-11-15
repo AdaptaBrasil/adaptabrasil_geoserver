@@ -3,231 +3,111 @@
 {% block title %}Mapa | AdaptaBrasil{% endblock %}
 
 {% block custom_css %}
-{{ super() }}
+<link rel="stylesheet" href="{{ url_for('static', filename='ol/ol.css') }}">
+<style>
+  #arvore, #arvore ul { list-style: none; padding-left: 0; margin: 0; }
+  #arvore ul { padding-left: 1.1rem; }
+  .no-indicador { display: flex; align-items: flex-start; }
+  .no-indicador .seta {
+    border: 0; background: none; width: 1.4rem; flex: none; padding: .25rem 0; color: #555;
+  }
+  .no-indicador .nome-indicador {
+    border: 0; background: none; text-align: left; padding: .25rem .4rem; border-radius: .25rem;
+  }
+  .no-indicador .nome-indicador:hover { background: #e9ecef; }
+  .no-indicador .nome-indicador.ativo { background: #0d6efd; color: #fff; }
+  #legenda { list-style: none; padding-left: 0; margin: 0; }
+  #legenda li { display: flex; align-items: center; gap: .5rem; margin-bottom: .2rem; font-size: .9rem; }
+  #legenda .cor { width: 1.2rem; height: 1.2rem; border: 1px solid #999; flex: none; }
+  /* Rodapé com o andamento do carregamento do mapa (static/js/mapa.js) */
+  :root { --rodape-altura: 32px; }
+  #map { bottom: var(--rodape-altura); }
+  #rodape {
+    position: fixed; left: 0; right: 0; bottom: 0; height: var(--rodape-altura); z-index: 20;
+    display: flex; align-items: center; gap: .75rem; padding: 0 1rem;
+    background: #f8f9fa; border-top: 1px solid #dee2e6; font-size: .85rem; color: #495057;
+  }
+  #rodape .progress { width: 160px; height: 8px; flex: none; }
+  #rodape .progress-bar { transition: width .2s linear; }
+  #rodape-texto { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #info {
+    position: fixed; right: 1rem; top: 130px; z-index: 10; background: #fff;
+    padding: .5rem .75rem; border-radius: .25rem; box-shadow: 0 1px 4px rgba(0,0,0,.3); max-width: 260px;
+  }
+</style>
 {% endblock %}
 
 {% block content %}
-<div class="d-flex" style="height: calc(100vh - 70px);">
+<div class="d-flex" style="height: calc(100vh - 70px - var(--rodape-altura));">
 
   <!-- Barra lateral -->
-  <div class="bg-light p-3 border-end" style="width: 400px; height: calc(100vh - 70px); overflow-y: auto;">
+  <div class="bg-light p-3 border-end" style="width: 400px; height: calc(100vh - 70px - var(--rodape-altura)); overflow-y: auto;">
     <!-- Título do indicador escolhido na home -->
-    <h3 style="margin-top: 3rem; margin-bottom: 3rem; font-weight: 500;">{{ titulo }}</h3>
-    <div class="accordion" id="mapaMental">
-      <!-- Seca -->
-      <div class="accordion-item" style="background-color: #f8f9fa;">
-        <h2 class="accordion-header">
-          <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#seca" layer="vw_st_multipolygon_scn_none_yr_2020_id_2">
-            Risco de estresse hídrico
-          </button>
-        </h2>
-        <div id="seca" class="accordion-collapse collapse " data-bs-parent="#mapaMental">
-          <div class="accordion-body">
+    <h3 style="margin-top: 3rem; margin-bottom: 1.5rem; font-weight: 500;">{{ titulo }}</h3>
 
-            <!-- Vulnerabilidade -->
-            <div class="accordion" id="vulnerabilidade">
-              <div class="accordion-item" style="background-color: #f8f9fa;">
-                <h2 class="accordion-header">
-                  <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
-                          data-bs-target="#vulnerabilidadeCollapse">
-                    Vulnerabilidade
-                  </button>
-                </h2>
-                <div id="vulnerabilidadeCollapse" class="accordion-collapse collapse">
-                  <div class="accordion-body">
+    <!-- Filtros de área: listas das views state e county (static/js/mapa.js) -->
+    <div class="row g-2 mb-4">
+      <div class="col">
+        <label for="estado" class="form-label small mb-1">Estado</label>
+        <select id="estado" class="form-select form-select-sm">
+          <option value="0" selected>Brasil</option>
+        </select>
+      </div>
+      <div class="col">
+        <label for="municipio" class="form-label small mb-1">Município</label>
+        <select id="municipio" class="form-select form-select-sm" disabled>
+          <option value="0" selected>Todos</option>
+        </select>
+      </div>
+    </div>
 
-                    <!-- Sensibilidade -->
-                    <div class="accordion" id="sensibilidade">
-                      <div class="accordion-item" style="background-color: #f8f9fa;">
-                        <h2 class="accordion-header">
-                          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
-                                  data-bs-target="#sensibilidadeCollapse">
-                            Sensibilidade
-                          </button>
-                        </h2>
-                        <div id="sensibilidadeCollapse" class="accordion-collapse collapse">
-                          <div class="accordion-body">
+    <!-- Árvore montada a partir de indicator_indicator (static/js/mapa.js) -->
+    <ul id="arvore"></ul>
 
-                            <!-- Oferta e Demanda -->
-                            <div class="accordion" id="ofertaDemanda">
-                              <div class="accordion-item" style="background-color: #f8f9fa;">
-                                <h2 class="accordion-header">
-                                  <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
-                                          data-bs-target="#ofertaDemandaCollapse">
-                                    Oferta e Demanda
-                                  </button>
-                                </h2>
-                                <div id="ofertaDemandaCollapse" class="accordion-collapse collapse">
-                                  <div class="accordion-body">
+    <!-- Painel do indicador selecionado -->
+    <div id="painel-indicador" class="mt-4 pt-3 border-top" hidden>
+      <h5 id="indicador-nome" style="font-weight: 500;"></h5>
 
-                                    <!-- Indisponibilidade hídrica superficial -->
-                                    <div class="accordion" id="indisponibilidadeHidricaSuperficial">
-                                      <div class="accordion-item" style="background-color: #f8f9fa;">
-                                        <h2 class="accordion-header">
-                                          <button class="accordion-button collapsed" type="button"
-                                                  data-bs-toggle="collapse"
-                                                  data-bs-target="#indisponibilidadeHidricaSuperficialCollapse">
-                                            Indisponibilidade hídrica superficial
-                                          </button>
-                                        </h2>
-                                        <div id="indisponibilidadeHidricaSuperficialCollapse"
-                                             class="accordion-collapse collapse">
-                                          <div class="accordion-body">
-                                          </div>
-                                        </div>
-                                      </div>
-                                    </div>
+      <p id="sem-dados" class="text-muted" hidden>Este indicador não tem dados para exibir no mapa.</p>
 
+      <div id="controles">
+        <div class="row g-2 mb-3">
+          <div class="col">
+            <label for="ano" class="form-label small mb-1">Ano</label>
+            <select id="ano" class="form-select form-select-sm"></select>
+          </div>
+          <div class="col">
+            <label for="cenario" class="form-label small mb-1">Cenário</label>
+            <select id="cenario" class="form-select form-select-sm"></select>
+          </div>
+        </div>
 
-                                    <!-- Balanço hídrico superficial -->
-                                    <div class="accordion" id="balancoHidricoSuperficial">
-                                      <div class="accordion-item" style="background-color: #f8f9fa;">
-                                        <h2 class="accordion-header">
-                                          <button class="accordion-button collapsed" type="button"
-                                                  data-bs-toggle="collapse"
-                                                  data-bs-target="#balancoHidricoSuperficialCollapse">
-                                            Balanço hídrico superficial
-                                          </button>
-                                        </h2>
-                                        <div id="balancoHidricoSuperficialCollapse" class="accordion-collapse collapse">
-                                          <div class="accordion-body">
-                                          </div>
-                                        </div>
-                                      </div>
-                                    </div>
+        <ul id="legenda" class="mb-3"></ul>
 
-                                    <!-- Usos consultivos -->
-                                    <div class="accordion" id="usosConsultivos">
-                                      <div class="accordion-item" style="background-color: #f8f9fa;">
-                                        <h2 class="accordion-header">
-                                          <button class="accordion-button collapsed" type="button"
-                                                  data-bs-toggle="collapse" data-bs-target="#usosConsultivosCollapse">
-                                            Usos consultivos
-                                          </button>
-                                        </h2>
-                                        <div id="usosConsultivosCollapse" class="accordion-collapse collapse">
-                                          <div class="accordion-body">
-                                          </div>
-                                        </div>
-                                      </div>
-                                    </div>
+        <div class="small">
+          Baixar dados:
+          <a id="baixar-csv" href="#">CSV</a> ·
+          <a id="baixar-shp" href="#">Shapefile</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
+<div id="map"></div>
+<div id="info" hidden></div>
 
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <!-- Capacidade Adaptativa -->
-                    <div class="accordion" id="capacidadeAdaptativa">
-                      <div class="accordion-item" style="background-color: #f8f9fa;">
-                        <h2 class="accordion-header">
-                          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
-                                  data-bs-target="#capacidadeCollapse">
-                            Capacidade Adaptativa
-                          </button>
-                        </h2>
-                        <div id="capacidadeCollapse" class="accordion-collapse collapse">
-                          <div class="accordion-body">
-
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Exposição -->
-            <div class="accordion-item">
-              <h2 class="accordion-header">
-                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
-                        data-bs-target="#exposicao">
-                  Exposição
-                </button>
-              </h2>
-              <div id="exposicao" class="accordion-collapse collapse">
-                <div class="accordion-body">
-                  <ul>
-                    <li>(i) População e ambiente natural
-                      <ul>
-                        <li>(1) População e áreas degradadas ou desmatadas</li>
-                        <li>(2) População e armazenamento subterrâneo</li>
-                      </ul>
-                    </li>
-                    <li>(ii) População
-                      <ul>
-                        <li>(1) Densidade populacional</li>
-                      </ul>
-                    </li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-
-            <!-- Ameaça Climática -->
-            <div class="accordion-item">
-              <h2 class="accordion-header">
-                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
-                        data-bs-target="#ameaca">
-                  Ameaça Climática
-                </button>
-              </h2>
-              <div id="ameaca" class="accordion-collapse collapse">
-                <div class="accordion-body">
-                  <ul>
-                    <li>(i) Condições meteorológicas
-                      <ul>
-                        <li>(1) Dias consecutivos secos</li>
-                        <li>(2) Índice de precipitação evapotranspirado padronizado</li>
-                      </ul>
-                    </li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-
-          </div> <!-- accordion-body -->
-        </div> <!-- collapse -->
-      </div> <!-- accordion-item -->
-    </div> <!-- accordion -->
-  </div> <!-- accordion-body -->
-</div> <!-- collapse -->
-</div> <!-- accordion-item -->
-</div> <!-- accordion -->
-</div> <!-- sidebar -->
+<footer id="rodape">
+  <div class="progress" role="progressbar" aria-label="Carregamento do mapa"
+       aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
+    <div id="rodape-barra" class="progress-bar bg-success" style="width: 0%"></div>
+  </div>
+  <span id="rodape-texto">Escolha um indicador na barra lateral.</span>
+</footer>
 {% endblock %}
 
 {% block custom_js %}
-{{ super() }}
-<script>
-  document.addEventListener("DOMContentLoaded", function () {
-    const buttons = document.querySelectorAll(".accordion-button");
-
-    buttons.forEach(button => {
-      const layerName = button.getAttribute("layer");
-
-      if (layerName) {
-        button.addEventListener("click", function (event) {
-          event.preventDefault(); // evita qualquer ação padrão de botão/link
-
-          const fullLayerName = `adaptabrasil:${layerName}`;
-
-          // Chama a função initMap para atualizar a camada do mapa dinamicamente
-          if (typeof initMap === 'function') {
-            initMap(fullLayerName);
-          } else {
-            console.error("Função initMap não está definida.");
-          }
-        });
-      }
-    });
-  });
-</script>
+<script src="{{ url_for('static', filename='ol/ol.js') }}"></script>
+<script>window.MAPA_CONFIG = {{ mapa_config | tojson }};</script>
+<script src="{{ url_for('static', filename='js/mapa.js') }}"></script>
 {% endblock %}
