@@ -23,7 +23,8 @@ def _obrigatoria(nome):
             f"Variável de ambiente {nome} não definida. "
             f"Copie o .env.example para .env e preencha os valores."
         )
-    return valor
+    # Espaços sobrando (comuns ao colar na configuração do PyCharm) quebram URLs
+    return valor.strip()
 
 
 # =====================================
