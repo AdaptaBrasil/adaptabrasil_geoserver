@@ -195,16 +195,28 @@ def carregar_setores():
     return setores
 
 
+def _chave_alfabetica(texto):
+    """Ordem alfabética sem distinguir acento nem maiúscula ('Água' junto de 'agua')."""
+    sem_acento = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode()
+    return sem_acento.casefold()
+
+
 def montar_arvore(raiz):
-    """Árvore aninhada a partir de raiz; ignora ciclos e repetições."""
+    """
+    Árvore aninhada a partir de raiz, com os filhos de cada nó em ordem
+    alfabética do nome; ignora ciclos e repetições.
+    """
     indicadores, filhos = carregar_indicadores()
     visitados = set()
 
+    def dados_de(id_):
+        return indicadores.get(id_, {"id": id_, "nome": "(sem nome)", "titulo": "",
+                                     "legenda": config.LEGENDA_PADRAO})
+
     def no(id_):
         visitados.add(id_)
-        dados = indicadores.get(id_, {"id": id_, "nome": "(sem nome)", "titulo": "",
-                                      "legenda": config.LEGENDA_PADRAO})
-        return {**dados, "filhos": [no(f) for f in filhos[id_] if f not in visitados]}
+        ordenados = sorted(filhos[id_], key=lambda f: (_chave_alfabetica(dados_de(f)["nome"]), f))
+        return {**dados_de(id_), "filhos": [no(f) for f in ordenados if f not in visitados]}
 
     return no(raiz)
 
