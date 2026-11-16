@@ -31,24 +31,34 @@
         serverType: "geoserver",
         crossOrigin: "anonymous",
     });
-    const camadaIndicador = new ol.layer.Image({ source: fonteIndicador, visible: false });
+    // Um pouco transparente, para o satélite aparecer por baixo (como no webtests)
+    const OPACIDADE_INDICADOR = 0.78;
+    const camadaIndicador = new ol.layer.Image({
+        source: fonteIndicador, visible: false, opacity: OPACIDADE_INDICADOR,
+    });
 
-    const camadaFundo = new ol.layer.Image({
-        source: new ol.source.ImageWMS({
-            url: cfg.wmsUrl,
-            params: { LAYERS: cfg.layerFundo, VERSION: "1.1.1", FORMAT: "image/png" },
-            serverType: "geoserver",
+    // Fundo: imagem de satélite da Esri (World Imagery), a mesma do webtests
+    const camadaFundo = new ol.layer.Tile({
+        source: new ol.source.XYZ({
+            url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            attributions: "Esri, Maxar, Earthstar Geographics",
+            maxZoom: 19,
             crossOrigin: "anonymous",
         }),
     });
 
-    const VISTA_BRASIL = { center: ol.proj.fromLonLat([-52.5, -16]), zoom: 4.75 };
+    // Vista inicial: o Brasil inteiro enquadrado no espaço do mapa, seja qual
+    // for o tamanho e a proporção da tela (um zoom fixo cortava o país em telas
+    // largas e baixas). Retângulo do continente até Fernando de Noronha.
+    const EXTENSAO_BRASIL = ol.proj.transformExtent([-74.0, -33.8, -32.3, 5.3], "EPSG:4326", "EPSG:3857");
+    const MARGEM_BRASIL = [20, 20, 20, 20];
 
     const map = new ol.Map({
         target: "map",
         layers: [camadaFundo, camadaIndicador],
-        view: new ol.View({ ...VISTA_BRASIL }),
+        view: new ol.View({ center: ol.extent.getCenter(EXTENSAO_BRASIL), zoom: 4 }),
     });
+    map.getView().fit(EXTENSAO_BRASIL, { padding: MARGEM_BRASIL });
 
     // ---------- Rodapé: andamento e tempo de carregamento ----------
 
@@ -199,7 +209,7 @@
     async function enquadrarArea() {
         const view = map.getView();
         if (!estado.estado) {
-            view.animate({ ...VISTA_BRASIL, duration: 400 });
+            view.fit(EXTENSAO_BRASIL, { padding: MARGEM_BRASIL, duration: 400 });
             return;
         }
         const area = `${estado.estado}/${estado.municipio}`;
@@ -237,6 +247,7 @@
         // Mesmo mapa já na tela: o OpenLayers não pede imagem nova
         const igual = camadaIndicador.getVisible()
             && atuais.VIEWPARAMS === params.VIEWPARAMS && atuais.STYLES === params.STYLES;
+        if (!igual) limparHover();
         fonteIndicador.updateParams(params);
         camadaIndicador.setVisible(true);
         atualizarDownloads();
@@ -380,29 +391,165 @@
         }));
     }
 
-    // ---------- Valor no clique (GetFeatureInfo) ----------
+    // ---------- Hover: nome, município e valor (GetFeatureInfo) ----------
 
-    const info = document.getElementById("info");
+    /*
+     * Como no webtests: o polígono sob o mouse ganha um contorno escuro e um
+     * popup mostra o nome (com a sigla do estado), o município a que ele
+     * pertence (setores censitários) e o valor, com a cor da faixa da legenda.
+     * O GeoServer devolve nome, valor e geometria; o município vem do Flask
+     * (/api/geoobjetos/<id>). Enquanto o mouse fica no mesmo polígono, o
+     * popup só acompanha o mouse, sem nova consulta. Um toque (sem mouse)
+     * também abre o popup.
+     */
+    const ESPERA_HOVER_MS = 120;
 
-    map.on("singleclick", async evt => {
-        if (!camadaIndicador.getVisible()) return;
-        const url = fonteIndicador.getFeatureInfoUrl(
-            evt.coordinate, map.getView().getResolution(), "EPSG:3857",
-            { INFO_FORMAT: "application/json", FEATURE_COUNT: 1 });
-        try {
-            const json = await (await fetch(url)).json();
-            const f = json.features && json.features[0];
-            if (!f) { info.hidden = true; return; }
-            const valor = f.properties.value === null ? "Dado indisponível"
-                : Number(f.properties.value).toLocaleString("pt-BR", { maximumFractionDigits: 4 });
-            info.replaceChildren();
-            const nome = document.createElement("strong");
-            nome.textContent = f.properties.name;
-            info.append(nome, document.createElement("br"), document.createTextNode(`Valor: ${valor}`));
-            info.hidden = false;
-        } catch (e) {
-            console.error("Falha no GetFeatureInfo", e);
+    const fonteDestaque = new ol.source.Vector();
+    const tracoDestaque = new ol.style.Stroke({ color: "#0b3d2e", width: 2.2 });
+    map.addLayer(new ol.layer.Vector({
+        source: fonteDestaque,
+        style: new ol.style.Style({
+            stroke: tracoDestaque,
+            image: new ol.style.Circle({ radius: 7, stroke: tracoDestaque }),  // portos
+        }),
+    }));
+
+    const dica = document.createElement("div");
+    dica.className = "geo-tip";
+    const overlayDica = new ol.Overlay({
+        element: dica, positioning: "bottom-center", offset: [0, -14], stopEvent: false,
+    });
+    map.addOverlay(overlayDica);
+
+    const formatoGeoJSON = new ol.format.GeoJSON();
+    const rotulos = new Map();   // id do geoobjeto -> {nome, municipio} ou a Promise do pedido
+    let hoverPedido = 0;         // descarta respostas de posições anteriores do mouse
+    let hoverTimer = null;
+    let hoverControle = null;    // AbortController do GetFeatureInfo em andamento
+
+    function buscarRotulo(id) {
+        if (!rotulos.has(id)) {
+            const pedido = fetch(`/api/geoobjetos/${id}`).then(r => (r.ok ? r.json() : {}));
+            rotulos.set(id, pedido);
+            pedido.then(r => rotulos.set(id, r), () => rotulos.delete(id));
         }
+        return Promise.resolve(rotulos.get(id));
+    }
+
+    // Cor da faixa da legenda, com a mesma regra dos estilos (scripts/sld.py):
+    // cada faixa vai do seu mínimo até o mínimo da seguinte; uma faixa com
+    // mínimo igual ao máximo (0 a 0) vale só para aquele valor.
+    function corDoValor(valor) {
+        const itens = (estado.indicador && estado.indicador.itens_legenda) || [];
+        if (valor === null || valor === undefined) {
+            return (itens.find(i => i.min === null) || {}).cor;
+        }
+        const comValor = itens.filter(i => i.min !== null)
+            .sort((a, b) => a.min - b.min || (a.max ?? 0) - (b.max ?? 0));
+        let cor;
+        for (const item of comValor) {
+            if (valor === item.min && item.min === item.max) return item.cor;
+            if (valor >= item.min) cor = item.cor;
+        }
+        return cor;
+    }
+
+    function formatarValor(valor) {
+        return valor === null || valor === undefined ? "Dado indisponível"
+            : Number(valor).toLocaleString("pt-BR", { maximumFractionDigits: 4 });
+    }
+
+    function mostrarDica(rotulo, valor, coordenada) {
+        const titulo = document.createElement("div");
+        titulo.className = "tip-title";
+        titulo.textContent = rotulo.nome ?? "…";
+        const sub = document.createElement("div");
+        sub.className = "tip-sub";
+        sub.textContent = rotulo.municipio ?? "";
+        sub.hidden = !rotulo.municipio;
+        const linhaValor = document.createElement("div");
+        linhaValor.className = "tip-value";
+        const ponto = document.createElement("span");
+        ponto.className = "tip-dot";
+        ponto.style.background = corDoValor(valor) || "#dcdcdc";
+        linhaValor.append(ponto, document.createTextNode(formatarValor(valor)));
+        dica.replaceChildren(titulo, sub, linhaValor);
+        overlayDica.setPosition(coordenada);
+    }
+
+    function limparHover() {
+        clearTimeout(hoverTimer);
+        hoverPedido++;
+        if (hoverControle) hoverControle.abort();
+        fonteDestaque.clear();
+        overlayDica.setPosition(undefined);
+        map.getTargetElement().style.cursor = "";
+    }
+
+    // O mouse ainda está no polígono destacado?
+    function noDestaque(coordenada) {
+        const feicao = fonteDestaque.getFeatures()[0];
+        const geom = feicao && feicao.getGeometry();
+        return !!geom && /Polygon/.test(geom.getType()) && geom.intersectsCoordinate(coordenada);
+    }
+
+    async function consultarHover(coordenada) {
+        const pedido = ++hoverPedido;
+        if (hoverControle) hoverControle.abort();
+        hoverControle = new AbortController();
+        const url = fonteIndicador.getFeatureInfoUrl(
+            coordenada, map.getView().getResolution(), "EPSG:3857",
+            { INFO_FORMAT: "application/json", FEATURE_COUNT: 1 });
+        let json;
+        try {
+            json = await (await fetch(url, { signal: hoverControle.signal })).json();
+        } catch (e) {
+            if (e.name !== "AbortError") console.error("Falha no GetFeatureInfo", e);
+            return;
+        }
+        if (pedido !== hoverPedido) return;
+
+        const f = json.features && json.features[0];
+        if (!f) {
+            fonteDestaque.clear();
+            overlayDica.setPosition(undefined);
+            map.getTargetElement().style.cursor = "";
+            return;
+        }
+        fonteDestaque.clear();
+        fonteDestaque.addFeature(formatoGeoJSON.readFeature(f));
+        map.getTargetElement().style.cursor = "pointer";
+
+        // O id vem como "indicador.<geoobject_id>"
+        const id = Number(String(f.id).split(".").pop());
+        const valor = f.properties.value;
+        const conhecido = rotulos.get(id);
+        if (conhecido && !(conhecido instanceof Promise)) {
+            mostrarDica(conhecido, valor, coordenada);
+            return;
+        }
+        mostrarDica({ nome: f.properties.name }, valor, coordenada);
+        const rotulo = await buscarRotulo(id).catch(() => null);
+        if (rotulo && rotulo.nome && pedido === hoverPedido) {
+            mostrarDica(rotulo, valor, overlayDica.getPosition() || coordenada);
+        }
+    }
+
+    map.on("pointermove", evt => {
+        if (evt.dragging) return;
+        clearTimeout(hoverTimer);
+        if (!camadaIndicador.getVisible()) return;
+        if (noDestaque(evt.coordinate)) {
+            // Mesmo polígono: o popup só acompanha o mouse
+            hoverPedido++;
+            if (overlayDica.getPosition()) overlayDica.setPosition(evt.coordinate);
+            return;
+        }
+        hoverTimer = setTimeout(() => consultarHover(evt.coordinate), ESPERA_HOVER_MS);
+    });
+    map.getViewport().addEventListener("mouseleave", limparHover);
+    map.on("singleclick", evt => {
+        if (camadaIndicador.getVisible()) consultarHover(evt.coordinate);
     });
 
     // ---------- Downloads (WFS) ----------

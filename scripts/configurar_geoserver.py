@@ -13,7 +13,7 @@ indicador, cenário e ano, o GeoServer passa a ter:
     com os municípios da tabela geoobject, e o seu estilo cinza
     (config.GEOSERVER_ESTILO_FUNDO).
 
-Os polígonos não têm linha de divisa (ver sld._poligono_sem_divisa).
+Os polígonos têm divisa fina em cinza claro só com o mapa aproximado (ver sld._estilo_divisa).
 
 Cenário 0 significa "sem cenário" (scenario_id nulo, o dado do presente).
 

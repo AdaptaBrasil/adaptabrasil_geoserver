@@ -1,0 +1,12 @@
+.venv
+.git
+.idea
+__pycache__
+*.pyc
+.env
+doc
+backup_legado
+scripts/saida_geoserver
+Dockerfile
+docker-compose.yml
+.dockerignore

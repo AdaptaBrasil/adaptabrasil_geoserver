@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 import threading
 import unicodedata
 from collections import defaultdict
@@ -194,16 +195,28 @@ def carregar_setores():
     return setores
 
 
+def _chave_alfabetica(texto):
+    """Ordem alfabética sem distinguir acento nem maiúscula ('Água' junto de 'agua')."""
+    sem_acento = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode()
+    return sem_acento.casefold()
+
+
 def montar_arvore(raiz):
-    """Árvore aninhada a partir de raiz; ignora ciclos e repetições."""
+    """
+    Árvore aninhada a partir de raiz, com os filhos de cada nó em ordem
+    alfabética do nome; ignora ciclos e repetições.
+    """
     indicadores, filhos = carregar_indicadores()
     visitados = set()
 
+    def dados_de(id_):
+        return indicadores.get(id_, {"id": id_, "nome": "(sem nome)", "titulo": "",
+                                     "legenda": config.LEGENDA_PADRAO})
+
     def no(id_):
         visitados.add(id_)
-        dados = indicadores.get(id_, {"id": id_, "nome": "(sem nome)", "titulo": "",
-                                      "legenda": config.LEGENDA_PADRAO})
-        return {**dados, "filhos": [no(f) for f in filhos[id_] if f not in visitados]}
+        ordenados = sorted(filhos[id_], key=lambda f: (_chave_alfabetica(dados_de(f)["nome"]), f))
+        return {**dados_de(id_), "filhos": [no(f) for f in ordenados if f not in visitados]}
 
     return no(raiz)
 
@@ -254,6 +267,32 @@ def buscar_limites(estado_id, municipio_id):
     return None if limites[0] is None else list(limites)
 
 
+@lru_cache(maxsize=4096)
+def buscar_rotulo_geoobjeto(geoobjeto_id):
+    """
+    Rótulos do popup do hover. A sigla do estado vai na linha da cidade: num
+    município, o próprio nome ("Igaratá/SP"); num setor censitário, o
+    município a que ele pertence ("Alexandria/RN"), com o código do setor no
+    título. O GeoServer só devolve nome e valor.
+    """
+    with conectar() as conn, conn.cursor() as cur:
+        cur.execute(f"""
+            SELECT CASE WHEN c.id IS NOT NULL AND c.id <> g.id THEN g.name::text
+                        WHEN g.state IS NULL THEN g.name::text
+                        ELSE concat(g.name, '/', g.state) END,
+                   CASE WHEN c.id IS NULL OR c.id = g.id THEN NULL
+                        WHEN c.state IS NULL THEN c.name::text
+                        ELSE concat(c.name, '/', c.state) END
+            FROM {SCHEMA}.geoobject g
+            LEFT JOIN {SCHEMA}.geoobject c ON c.id = g.county_id
+            WHERE g.id = %s
+        """, (geoobjeto_id,))
+        linha = cur.fetchone()
+    if linha is None:
+        return None
+    return {"nome": linha[0], "municipio": linha[1]}
+
+
 def buscar_opcoes(indicador_id):
     """Combinações de ano e cenário que têm dados para o indicador."""
     with conectar() as conn, conn.cursor() as cur:
@@ -288,7 +327,6 @@ def mapa():
     mapa_config = {
         "wmsUrl": GEOSERVER_WMS_URL,
         "layer": f"{config.geoserver_workspace()}:{config.GEOSERVER_LAYER}",
-        "layerFundo": LAYER_PADRAO,
         "prefixoEstilo": config.GEOSERVER_PREFIXO_ESTILO,
         "raiz": dados["raiz"],
     }
@@ -335,6 +373,13 @@ def api_limites():
         abort(404)
     return jsonify(limites)
 
+@app.route('/api/geoobjetos/<int:geoobjeto_id>')
+def api_geoobjeto(geoobjeto_id):
+    rotulo = buscar_rotulo_geoobjeto(geoobjeto_id)
+    if rotulo is None:
+        abort(404)
+    return jsonify(rotulo)
+
 @app.route('/api/indicadores/<int:indicador_id>')
 def api_indicador(indicador_id):
     indicadores, _ = carregar_indicadores()
@@ -353,4 +398,9 @@ if __name__ == '__main__':
     # Em debug o app só escuta em localhost: o depurador do Werkzeug executa
     # código Python e não pode ficar exposto na rede.
     debug = os.getenv("FLASK_DEBUG", "0").lower() in ("1", "true")
-    app.run(host='127.0.0.1' if debug else '0.0.0.0', port=5000, debug=debug)
+    # Sob o depurador do PyCharm (pydevd) o recarregamento fica desligado: para
+    # reiniciar, o Werkzeug encerra o processo com sys.exit(3), e o depurador
+    # para nesse SystemExit como se fosse um erro.
+    sob_depurador = "pydevd" in sys.modules
+    app.run(host='127.0.0.1' if debug else '0.0.0.0', port=5000, debug=debug,
+            use_reloader=debug and not sob_depurador)
