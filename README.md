@@ -11,15 +11,15 @@ Navegador ──► App Flask (este repositório) ──► PostgreSQL
    │            árvore de indicadores, legendas,
    │            estados, municípios, popup do hover
    │
-   └──────────► GeoServer (3.224.52.81:8080, fora do Docker)
+   └──────────► GeoServer (fora do Docker)
                 imagens do mapa (WMS), hover (GetFeatureInfo),
                 downloads em CSV e shapefile (WFS)
 ```
 
 - O **app** consulta o banco e entrega as páginas; o endereço público do
   GeoServer vai para o navegador, que pede os mapas direto a ele.
-- O **GeoServer** roda no servidor da AWS, fora do Docker, e guarda a
-  configuração (layers e estilos) na pasta de dados dele.
+- O **GeoServer** roda fora do Docker, no mesmo servidor ou em outro, e guarda
+  a configuração (layers e estilos) na pasta de dados dele.
 - O **`scripts/configurar_geoserver.py`** cria ou atualiza a layer
   `adaptabrasil:indicador`, a layer de fundo e um estilo SLD por legenda da
   tabela `legend_items`. Rode de novo sempre que mudar `scripts/sld.py` ou as
@@ -72,11 +72,12 @@ python scripts/configurar_geoserver.py --simular   # só grava os XML em scripts
 python scripts/configurar_geoserver.py             # aplica no GeoServer
 ```
 
-O `.env` aponta o GeoServer para `localhost:8081`, que só existe de dentro do
-servidor. Para rodar da sua máquina, troque o endereço só nessa execução:
+Se o `ADAPTABRASIL_GEOSERVER_URL` do `.env` usa um endereço que só vale de
+dentro do servidor (por exemplo, `localhost`), troque o endereço só nessa
+execução para rodar da sua máquina:
 
 ```bash
-ADAPTABRASIL_GEOSERVER_URL=http://3.224.52.81:8080/geoserver python scripts/configurar_geoserver.py
+ADAPTABRASIL_GEOSERVER_URL=http://<servidor-geoserver>:8080/geoserver python scripts/configurar_geoserver.py
 ```
 
 ## Deploy com Docker
@@ -85,25 +86,31 @@ A imagem roda só o app Flask, com o gunicorn (2 processos × 8 threads). O
 GeoServer e o banco continuam onde estão. O desenvolvimento continua no venv;
 o Docker é para o servidor.
 
-### No servidor da AWS (3.224.52.81)
+### Num servidor Linux
 
-O app fica em `~/inpe/aluana_ic/app_adaptabrasil`, um clone deste
-repositório. Primeira vez:
+Pré-requisitos: Git, Docker com o plugin Compose (`docker compose version`),
+acesso do servidor ao PostgreSQL e ao GeoServer, e um usuário no grupo
+`docker`.
+
+Primeira vez:
 
 ```bash
-cd ~/inpe/aluana_ic/app_adaptabrasil
-git checkout geoserver-parametrizado
-cp .env.example .env            # preencha as senhas
+git clone https://github.com/AdaptaBrasil/adaptabrasil_geoserver.git
+cd adaptabrasil_geoserver
+cp .env.example .env            # preencha os endereços e as senhas
 docker compose up -d --build
 ```
 
-Libere a porta (`APP_PORTA`, padrão 5000) no Security Group da instância
-(EC2 → Security → Inbound rules). O app fica em `http://3.224.52.81:5000`.
+Libere a porta do app (`APP_PORTA`, padrão 5000) no firewall do servidor
+(por exemplo, `sudo ufw allow 5000/tcp`) e, se houver, no firewall do provedor
+de nuvem. O app fica em `http://<servidor>:5000`. Para servir em HTTPS ou na
+porta 80, ponha um proxy reverso (nginx, Caddy) na frente da porta do app.
 
 ### Atualizar depois de novos commits
 
+Na pasta do clone:
+
 ```bash
-cd ~/inpe/aluana_ic/app_adaptabrasil
 git pull
 docker compose up -d --build
 ```
@@ -132,9 +139,9 @@ docker compose down
 
 ### Se o contêiner não alcançar o banco
 
-Dentro do contêiner, `localhost` é o próprio contêiner. O `.env` usa o IP
-público do banco, o que costuma funcionar. Se o firewall bloquear o servidor
-de acessar o próprio IP público, use o endereço do host:
+Dentro do contêiner, `localhost` é o próprio contêiner, e não o servidor. Se o
+banco roda no mesmo servidor, não use `localhost` no `.env`: use o IP do
+servidor ou o endereço do host:
 
 ```
 # .env
