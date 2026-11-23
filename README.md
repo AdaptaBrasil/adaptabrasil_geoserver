@@ -49,7 +49,6 @@ o Git nem para a imagem Docker.
 | `ADAPTABRASIL_GEOSERVER_URL`, `_USER`, `_PASSWORD` | API REST do GeoServer, usada só pelo `configurar_geoserver.py` |
 | `ADAPTABRASIL_GEOSERVER_PUBLIC_URL` | Endereço do GeoServer que o navegador usa para os mapas |
 | `ADAPTABRASIL_GEOSERVER_WORKSPACE`, `_DATASTORE`, `_LAYER` | Nomes no GeoServer |
-| `ADAPTABRASIL_RELOAD_TOKEN` | Token do `/reload` (veja [Recarregar os dados do banco](#recarregar-os-dados-do-banco-reload)); vazio desliga o `/reload` |
 | `APP_PORTA` | Porta do servidor onde o app atende no Docker (padrão 5000) |
 
 ## Desenvolvimento (venv)
@@ -138,28 +137,25 @@ exemplo, em `sep.order_by` ou um `REFRESH MATERIALIZED VIEW mv_hierarchy`) só
 aparece no app depois de recarregar esses dados. O `/reload` faz isso sem
 reiniciar o contêiner.
 
-1. Gere um token e ponha no `.env` do servidor (depois, `docker compose up -d`
-   para o contêiner ler o `.env` novo):
+Ele só atende pedidos do próprio servidor. Depois de cada mudança no banco,
+entre no servidor (SSH) e rode:
 
-   ```bash
-   python -c "import secrets; print(secrets.token_urlsafe(24))"
-   ```
+```bash
+curl -X POST http://localhost:5000/reload     # use a APP_PORTA, se não for 5000
+```
 
-   ```
-   # .env
-   ADAPTABRASIL_RELOAD_TOKEN=<token>
-   ```
+A resposta é `{"recarregado": true}`. De qualquer outra máquina, o `/reload`
+responde 403. Na sua máquina, com o app rodando no PyCharm, também funciona
+(`http://127.0.0.1:5000/reload`).
 
-2. Depois de cada mudança no banco, chame o `/reload` com o token, no
-   cabeçalho `X-Reload-Token` ou no parâmetro `token`:
-
-   ```bash
-   curl -X POST -H "X-Reload-Token: <token>" http://<servidor>:5000/reload
-   # ou no navegador: http://<servidor>:5000/reload?token=<token>
-   ```
-
-   A resposta é `{"recarregado": true}`. Token errado dá 403; sem
-   `ADAPTABRASIL_RELOAD_TOKEN` no `.env`, o `/reload` fica desligado (sempre 403).
+Como o app sabe que o pedido é do servidor: no Docker, um `curl localhost`
+rodado no servidor chega ao contêiner com o IP do host (o gateway do
+contêiner), e é esse IP, além de 127.0.0.1, que o `/reload` aceita. Se houver
+um proxy reverso (nginx, Caddy) na frente do app, todo pedido de fora também
+chegaria do host; por isso pedidos com `X-Forwarded-For`, `X-Real-IP` ou
+`Forwarded` são recusados. Configure o proxy para mandar um desses cabeçalhos
+(o Caddy já manda; no nginx, `proxy_set_header X-Forwarded-For
+$proxy_add_x_forwarded_for;`) ou para bloquear o caminho `/reload`.
 
 O gunicorn roda 2 processos, cada um com o seu cache, e o `/reload` chega a só
 um deles. Por isso ele também grava um arquivo-marca no diretório temporário do

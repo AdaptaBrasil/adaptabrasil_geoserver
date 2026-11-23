@@ -1,6 +1,8 @@
-import hmac
+import ipaddress
 import os
 import re
+import socket
+import struct
 import sys
 import tempfile
 import threading
@@ -438,6 +440,49 @@ def _recarregar_se_marcado():
         _recarga_vista = marca
 
 
+def _gateway_do_docker():
+    """
+    IP do host visto de dentro do contêiner (o gateway padrão, lido de
+    /proc/net/route), ou None fora do Docker.
+
+    Um `curl localhost:5000` rodado no servidor chega ao contêiner com esse IP
+    de origem, e não 127.0.0.1. Fora do Docker o gateway é o roteador da rede,
+    que não deve ser aceito.
+    """
+    if not Path("/.dockerenv").exists():
+        return None
+    try:
+        with open("/proc/net/route") as rotas:
+            for linha in rotas.readlines()[1:]:
+                campos = linha.split()
+                if campos[1] == "00000000" and int(campos[3], 16) & 2:  # padrão, RTF_GATEWAY
+                    return socket.inet_ntoa(struct.pack("<L", int(campos[2], 16)))
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+_GATEWAY_DOCKER = _gateway_do_docker()
+
+
+def _pedido_do_proprio_servidor():
+    """
+    True se o pedido veio do próprio servidor: de localhost ou, no Docker, do
+    host. Pedido repassado por proxy reverso (nginx, Caddy) nunca conta, porque
+    para o app ele também viria do host.
+    """
+    if any(cabecalho in request.headers
+           for cabecalho in ("X-Forwarded-For", "X-Real-IP", "Forwarded")):
+        return False
+    try:
+        ip = ipaddress.ip_address(request.remote_addr or "")
+    except ValueError:
+        return False
+    if ip.version == 6 and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    return ip.is_loopback or str(ip) == _GATEWAY_DOCKER
+
+
 @app.route('/reload', methods=['GET', 'POST'])
 def recarregar():
     """
@@ -445,15 +490,11 @@ def recarregar():
     limites, sem reiniciar. Use depois de mudar o banco ou de um
     REFRESH MATERIALIZED VIEW mv_hierarchy.
 
-    Exige o token ADAPTABRASIL_RELOAD_TOKEN do .env, no cabeçalho
-    X-Reload-Token ou no parâmetro ?token=; sem token configurado, fica desligado.
+    Só atende pedidos do próprio servidor (curl http://localhost:5000/reload);
+    de fora, responde 403.
     """
     global _recarga_vista
-    esperado = config.RELOAD_TOKEN
-    if not esperado:
-        abort(403, "ADAPTABRASIL_RELOAD_TOKEN não definido no .env")
-    recebido = request.headers.get("X-Reload-Token") or request.args.get("token") or ""
-    if not hmac.compare_digest(recebido.encode(), esperado.encode()):
+    if not _pedido_do_proprio_servidor():
         abort(403)
     with _recarga_trava:
         _MARCA_RECARGA.touch()

@@ -45,10 +45,6 @@ def db_config():
     }
 
 
-# Token do /reload, que faz o app reler o banco sem reiniciar; vazio desliga o /reload
-RELOAD_TOKEN = os.getenv("ADAPTABRASIL_RELOAD_TOKEN", "").strip()
-
-
 # =====================================
 # GEOSERVER
 # =====================================
