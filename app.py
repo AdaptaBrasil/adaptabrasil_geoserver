@@ -1,11 +1,14 @@
+import hmac
 import os
 import re
 import sys
+import tempfile
 import threading
 import unicodedata
 from collections import defaultdict
 from contextlib import contextmanager
 from functools import lru_cache
+from pathlib import Path
 
 from psycopg2.pool import ThreadedConnectionPool
 from flask import Flask, render_template, request, abort, jsonify
@@ -84,7 +87,7 @@ def carregar_indicadores():
 
     Ela traz um registro por indicador, com o pai (indicator_id_master), e só
     inclui os temas (sep) visíveis. Os dados mudam raramente; depois de um
-    REFRESH MATERIALIZED VIEW mv_hierarchy, reinicie o app para recarregar.
+    REFRESH MATERIALIZED VIEW mv_hierarchy, chame /reload (ou reinicie o app).
     """
     with conectar() as conn, conn.cursor() as cur:
         cur.execute(f"""
@@ -391,6 +394,72 @@ def api_indicador(indicador_id):
         "opcoes": buscar_opcoes(indicador_id),
         "itens_legenda": carregar_legendas().get(dados["legenda"], []),
     })
+
+
+# =====================================
+# RECARGA DOS CACHES
+# =====================================
+
+# Tudo o que o app guarda em memória a partir do banco
+_CACHES = (carregar_indicadores, carregar_setores, carregar_legendas, carregar_estados,
+           carregar_municipios, buscar_limites, buscar_rotulo_geoobjeto)
+
+# No deploy, o gunicorn roda vários processos, cada um com os seus caches, e o
+# /reload chega a só um deles. Por isso o /reload grava um arquivo-marca no
+# diretório temporário (o mesmo para todos os processos do contêiner); a cada
+# requisição, cada processo compara a data da marca com a da última limpeza.
+_MARCA_RECARGA = Path(tempfile.gettempdir()) / f"adaptabrasil_recarga_{SCHEMA}"
+_recarga_trava = threading.Lock()
+_recarga_vista = None  # st_mtime_ns da marca na última limpeza deste processo
+
+
+def _data_da_marca():
+    try:
+        return _MARCA_RECARGA.stat().st_mtime_ns
+    except FileNotFoundError:
+        return 0
+
+
+def _limpar_caches():
+    for funcao in _CACHES:
+        funcao.cache_clear()
+
+
+@app.before_request
+def _recarregar_se_marcado():
+    """Limpa os caches deste processo se outro processo recebeu um /reload."""
+    global _recarga_vista
+    marca = _data_da_marca()
+    if marca == _recarga_vista:
+        return
+    with _recarga_trava:
+        if _recarga_vista is not None and marca != _recarga_vista:
+            _limpar_caches()
+        _recarga_vista = marca
+
+
+@app.route('/reload', methods=['GET', 'POST'])
+def recarregar():
+    """
+    Faz o app reler do banco indicadores, hierarquia, setores, legendas e
+    limites, sem reiniciar. Use depois de mudar o banco ou de um
+    REFRESH MATERIALIZED VIEW mv_hierarchy.
+
+    Exige o token ADAPTABRASIL_RELOAD_TOKEN do .env, no cabeçalho
+    X-Reload-Token ou no parâmetro ?token=; sem token configurado, fica desligado.
+    """
+    global _recarga_vista
+    esperado = config.RELOAD_TOKEN
+    if not esperado:
+        abort(403, "ADAPTABRASIL_RELOAD_TOKEN não definido no .env")
+    recebido = request.headers.get("X-Reload-Token") or request.args.get("token") or ""
+    if not hmac.compare_digest(recebido.encode(), esperado.encode()):
+        abort(403)
+    with _recarga_trava:
+        _MARCA_RECARGA.touch()
+        _limpar_caches()
+        _recarga_vista = _data_da_marca()
+    return jsonify({"recarregado": True})
 
 
 if __name__ == '__main__':
