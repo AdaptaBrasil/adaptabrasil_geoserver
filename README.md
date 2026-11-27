@@ -189,6 +189,49 @@ ADAPTABRASIL_DB_HOST=host.docker.internal
       - "host.docker.internal:host-gateway"
 ```
 
+## GeoServer no servidor
+
+No servidor de produção, o GeoServer (2.28, com o Jetty que vem no pacote
+binário) roda fora do Docker, como serviço do systemd, com o usuário `ubuntu`:
+
+| O quê | Onde |
+|---|---|
+| Instalação (`GEOSERVER_HOME`) | `~/inpe/geoserver` |
+| Pasta de dados (`GEOSERVER_DATA_DIR`): workspace, layers, estilos, conexão com o banco | `~/inpe/geoserver/data_dir` |
+| Serviço | `/etc/systemd/system/geoserver.service` |
+| Variáveis para rodar à mão | `~/.profile` |
+| Porta | 8080 (`http://<servidor-geoserver>:8080/geoserver`) |
+
+```bash
+sudo systemctl status geoserver        # está rodando?
+sudo systemctl restart geoserver       # reiniciar (leva uns 10 s para voltar)
+sudo journalctl -u geoserver -f        # logs (Ctrl+C sai)
+```
+
+Para mudar a instalação de pasta: pare o serviço, mova a pasta e troque o
+caminho no `geoserver.service` (`WorkingDirectory`, `GEOSERVER_HOME` e
+`ExecStart`) e no `~/.profile`; depois `sudo systemctl daemon-reload` e
+`sudo systemctl start geoserver`. A configuração dentro da `data_dir` não tem
+caminhos absolutos.
+
+Depois de reiniciar, confira se o mapa sai como imagem, e não como XML de erro:
+
+```bash
+curl -s -o /dev/null -w "%{content_type}\n" \
+  "http://localhost:8080/geoserver/adaptabrasil/wms?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=adaptabrasil:mapa_cinza&STYLES=&SRS=EPSG:4326&BBOX=-74,-34,-28,6&WIDTH=200&HEIGHT=175&FORMAT=image/png"
+# image/png = ok
+```
+
+Se vier `application/vnd.ogc.se_xml` com `No code "EPSG:4326"`, o GeoServer não
+conseguiu abrir o banco de projeções que o GeoTools extrai em
+`/tmp/GeoTools`. Isso acontece quando essa pasta foi criada pelo `root` (por
+exemplo, num GeoServer iniciado com `sudo`). Corrija o dono e reinicie:
+
+```bash
+sudo chown -R ubuntu:ubuntu /tmp/GeoTools
+sudo systemctl restart geoserver
+```
+
 ## Observações
 
 - Indicadores, hierarquia e legendas ficam em cache na memória do app. Depois
