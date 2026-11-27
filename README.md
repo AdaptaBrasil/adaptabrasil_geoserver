@@ -189,10 +189,100 @@ ADAPTABRASIL_DB_HOST=host.docker.internal
       - "host.docker.internal:host-gateway"
 ```
 
-## GeoServer no servidor
+## O que o app precisa do GeoServer
 
-No servidor de produção, o GeoServer (2.28, com o Jetty que vem no pacote
-binário) roda fora do Docker, como serviço do systemd, com o usuário `ubuntu`:
+Vale para qualquer GeoServer (testado com o 2.28). Antes de rodar o
+`configurar_geoserver.py`:
+
+1. **Workspace e datastore**: o script cria as layers e os estilos, mas não o
+   workspace nem o datastore. Crie o workspace `adaptabrasil` e, nele, um
+   datastore PostGIS `adaptabrasil` apontando para o banco do `.env`, schema
+   `adaptabrasil_aluana`, com *Expose primary keys* desligado. Os nomes podem
+   ser outros, desde que batam com `ADAPTABRASIL_GEOSERVER_WORKSPACE` e
+   `_DATASTORE`. O servidor do GeoServer precisa alcançar o PostgreSQL.
+2. **CORS**: o popup do hover pede o GetFeatureInfo ao GeoServer direto do
+   navegador, a partir do endereço do app. Libere CORS no GeoServer para a
+   origem do app (no `web.xml` da aplicação). Sem isso o mapa carrega, mas o
+   popup não aparece, e o erro só se vê no console do navegador.
+3. **HTTPS**: se o app for servido em HTTPS, o
+   `ADAPTABRASIL_GEOSERVER_PUBLIC_URL` também precisa ser HTTPS; senão o
+   navegador bloqueia os mapas.
+4. **Formatos do WFS**: os downloads usam WFS com `outputFormat` `csv` e
+   `SHAPE-ZIP`, que vêm ligados por padrão.
+
+Depois, rode o `configurar_geoserver.py` (ver
+[Publicar os estilos no GeoServer](#publicar-os-estilos-no-geoserver)) e
+aponte o `ADAPTABRASIL_GEOSERVER_PUBLIC_URL` do app para o novo GeoServer.
+
+## O que o app precisa do banco
+
+PostgreSQL com PostGIS (hoje: PostgreSQL 16 e PostGIS 3.4, a extensão no
+schema `public`). Os dados ficam no schema `adaptabrasil_aluana` (o nome vem de
+`ADAPTABRASIL_DB_SCHEMA`), cujo dono é o usuário do app, `adaptabrasil_user`.
+As geometrias estão em EPSG:4326. O app e o GeoServer precisam alcançar o
+banco.
+
+O que o app e a layer `indicador` leem:
+
+| Objeto | Tipo | Para quê |
+|---|---|---|
+| `value` | tabela (~3 GB) | Valores dos indicadores; a layer usa o índice `value_unique` |
+| `geoobject` | tabela (~2 GB) | Geometrias e nomes (municípios, setores, portos, rodovias, ferrovias) |
+| `indicator`, `indicator_indicator`, `sep`, `scenario`, `legend_items`, `geoobjecttype`, `image` | tabelas pequenas | Árvore, setores da home, cenários, legendas |
+| `state`, `county` | materialized views (de `geoobject`) | Filtros de estado e município, enquadramento do mapa |
+| `mv_indiclevelyears`, `mv_hierarchy` | materialized views | Anos de cada indicador e a árvore; `mv_hierarchy` depende de `mv_indiclevelyears` |
+
+### Migrar o banco
+
+O schema tem ~42 GB, mas a maior parte não é usada pelo app: a materialized
+view `geovalue` (27 GB), as tabelas `valores`, `valores2` e `contribution` e a
+materialized view `census_track` (~7 GB juntas). Combine com quem cuida dos
+dados se elas vão junto; o app precisa só dos objetos da tabela acima (~5 GB).
+
+Cópia do schema inteiro:
+
+```bash
+# na origem
+pg_dump -Fc -n adaptabrasil_aluana --no-owner --no-privileges \
+  -h <host-origem> -p <porta> -U adaptabrasil_user -d adaptabrasil -f adaptabrasil_aluana.dump
+
+# no destino: banco criado, CREATE EXTENSION postgis; e o usuário do app criado
+pg_restore --no-owner --role=adaptabrasil_user \
+  -h <host-destino> -p <porta> -U adaptabrasil_user -d adaptabrasil adaptabrasil_aluana.dump
+```
+
+O `pg_restore` recalcula as materialized views que tinham dados; a
+`geovalue` é a que mais demora. Se alguma das usadas pelo app ficar vazia,
+recalcule nesta ordem (não use a função `refreshallmaterializedviews()` do
+schema: ela recalcula todas, a `geovalue` inclusive, e em ordem alfabética,
+com a `mv_hierarchy` antes da `mv_indiclevelyears` de que ela depende):
+
+```sql
+REFRESH MATERIALIZED VIEW adaptabrasil_aluana.state;
+REFRESH MATERIALIZED VIEW adaptabrasil_aluana.county;
+REFRESH MATERIALIZED VIEW adaptabrasil_aluana.mv_indiclevelyears;
+REFRESH MATERIALIZED VIEW adaptabrasil_aluana.mv_hierarchy;
+```
+
+O `scripts/setor_censitario_raiz.sql` já está aplicado nos dados e vai junto
+na cópia.
+
+Depois da cópia, aponte para o banco novo:
+
+1. o `.env` do app (`ADAPTABRASIL_DB_*`) e reinicie o app;
+2. o datastore `adaptabrasil` no GeoServer (host, porta, banco, schema,
+   usuário e senha);
+3. se o nome do schema mudar, rode de novo o `configurar_geoserver.py`,
+   que grava o nome do schema no SQL da layer `indicador`.
+
+## GeoServer no servidor atual
+
+Esta seção descreve o servidor onde o app roda hoje; num GeoServer
+administrado por outra equipe, vale a seção
+[O que o app precisa do GeoServer](#o-que-o-app-precisa-do-geoserver).
+
+Nesse servidor, o GeoServer (2.28, com o Jetty que vem no pacote binário) roda
+fora do Docker, como serviço do systemd, com o usuário `ubuntu`:
 
 | O quê | Onde |
 |---|---|
